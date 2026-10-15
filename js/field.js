@@ -39,7 +39,32 @@ SC.Field = class Field {
     this.slowAllT = 0;
     this.slowAllF = 1;
     this.local = o.local !== false; // lokale Felder machen Sound
+    this.headless = !!o.headless; // Server: keine Effekte
+    this.maxLives = o.lives;
+    this.rng = new SC.Rng(o.seed || 1);
+    this.tid = 1; // Turm-IDs (vom Client vergeben, damit Server & Client gleich zählen)
+    this.cid = 1; // Kisten-IDs
+    // Ausrüstung: erlaubte Türme (null = alle) und Kräfte
+    this.allowed = o.towers ? o.towers.slice() : null;
+    this.powers = (o.powers || []).map((id) => ({ id, cd: 0 }));
+    this.rageT = 0;
+    this.radarT = 0;
+    this.shieldT = 0;
+    this.shieldHp = 0;
+    this.hexBoostT = 0;
+    this.hexFogT = 0;
+    this.curSend = null; // gerade ausströmender Send (für die Röhre)
     this._p = { x: 0, y: 0, a: 0 };
+  }
+  rnd() {
+    return this.rng.next();
+  }
+  canBuild(kind) {
+    return !this.allowed || this.allowed.indexOf(kind) >= 0;
+  }
+  // Ereignisse, die das andere Feld betreffen (Flaschenpost, Flüche)
+  emit(kind, data) {
+    if (this.game && this.game.onFieldEvent) this.game.onFieldEvent(this, kind, data);
   }
 
   // ---------------- Spawns ----------------
@@ -48,17 +73,32 @@ SC.Field = class Field {
     for (const sp of R.spawns) this.spawns.push({ at: this.time + sp.at + 0.5, type: sp.type, camo: sp.camo, regrow: sp.regrow });
     this.spawns.sort((a, b) => a.at - b.at);
   }
-  receiveSend(send, mods) {
-    if (this.sendQueue.length >= SC.SEND_QUEUE_MAX) return false;
+  receiveSend(send, mods, force) {
+    if (!force && this.sendQueue.length >= SC.SEND_QUEUE_MAX) return false;
     this.sendQueue.push({ send, mods: mods || {} });
     return true;
+  }
+  // Flaschenpost: gefangene Blasen des Gegners kommen hier an
+  receivePost(types, mods) {
+    const list = types.filter((t) => SC.BLOONS[t]).slice(0, 24);
+    if (!list.length || this.sendQueue.length >= SC.POST_QUEUE_MAX) return false;
+    const big = list.some((t) => SC.BLOONS[t].moab);
+    this.sendQueue.push({ send: { id: 'post', types: list, type: list[0], count: list.length, spacing: big ? 1.2 : 0.22 }, mods: mods || {} });
+    return true;
+  }
+  applyHex(id, dur) {
+    if (id === 'boost') this.hexBoostT = Math.max(this.hexBoostT, dur);
+    else if (id === 'fog') {
+      this.hexFogT = Math.max(this.hexFogT, dur);
+      this.buffT = 0;
+    }
   }
   spawnBloon(type, dist, camo, regrow, orig) {
     const d = SC.BLOONS[type];
     const b = {
       id: this.nid++, type, def: d, hp: d.hp, dist, x: 0, y: 0, a: 0,
       camo: !!camo, regrow: !!regrow, orig: orig || type, regT: 0,
-      frozen: 0, slowT: 0, slowF: 1, stun: 0, immP: 0, dead: false, aura: 1, vuln: 0, markT: 0, dotT: 0, dotA: 0,
+      frozen: 0, slowT: 0, slowF: 1, stun: 0, immP: 0, dead: false, aura: 1, vuln: 0, markT: 0, dotT: 0, dotA: 0, pushes: 0, soakT: 0,
     };
     this.path.pos(dist, this._p);
     b.x = this._p.x;
@@ -96,7 +136,7 @@ SC.Field = class Field {
         else if (o.moabStun) b.stun = Math.max(b.stun, o.moabStun);
       }
     }
-    this.damage(b, dmg + b.vuln + (b.markT > 0 ? 2 : 0), (o && o.id) || 0);
+    this.damage(b, dmg + b.vuln + (b.markT > 0 ? 2 : 0) + (b.soakT > 0 ? 1 : 0), (o && o.id) || 0);
     return true;
   }
   damage(b, dmg, pid) {
@@ -127,6 +167,8 @@ SC.Field = class Field {
       c.slowF = b.slowF;
       c.markT = b.markT;
       c.dotT = b.dotT;
+      c.pushes = b.pushes;
+      c.soakT = b.soakT;
       if (i === 0 && over > 0) this.damage(c, over, pid);
     }
   }
@@ -145,13 +187,14 @@ SC.Field = class Field {
     this.addFx({ k: 'boom', x, y, r, dur: 0.28, c: col || (type === 'heat' ? '#ffcf4d' : '#ffffff') });
   }
   sparks(x, y, n, cols, speed, confetti) {
-    if (this.fx.length > 260) return;
+    if (this.headless || this.fx.length > 260) return;
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2, v = speed * (0.4 + Math.random() * 0.8);
       this.fx.push({ k: confetti ? 'confetti' : 'spark', x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - (confetti ? speed * 0.6 : 0), c: cols[i % cols.length], t: 0, dur: confetti ? 1.4 : 0.6 + Math.random() * 0.3, rot: Math.random() * 6, s: 2 + Math.random() * 2.5 });
     }
   }
   addFx(f) {
+    if (this.headless) return;
     f.t = 0;
     this.fx.push(f);
   }
@@ -167,17 +210,31 @@ SC.Field = class Field {
     }
     return true;
   }
-  placeTower(kind, x, y, free) {
+  towerById(id) {
+    for (const t of this.towers) if (t.id === id) return t;
+    return null;
+  }
+  newTower(kind, x, y, id) {
     const def = SC.TOWERS[kind];
-    if (!free && this.money < def.cost) return null;
-    if (!this.canPlace(kind, x, y)) return null;
-    if (!free) this.money -= def.cost;
     const t = {
-      id: this.nid++, kind, def, x, y, tiers: [0, 0], spent: def.cost, s: null, cd: 0.2, ang: -Math.PI / 2, anim: 0,
-      target: 'first', buff: { speed: 0, range: 0, pierce: 0, camo: false, armor: false, dance: false },
+      id, kind, def, x, y, tiers: [0, 0], spent: def.cost, s: null, cd: 0.2, ang: -Math.PI / 2, anim: 0,
+      target: 'first', buff: { speed: 0, range: 0, pierce: 0, camo: false, armor: false, dance: false, dmg: 0 },
       cnt: 0, drones: [], orbitA: 0, orbHit: new Map(), danceT: 0, danceCd: 25, pearlT: 30, bankT: 30, whaleT: 12, cannonCd: 1,
+      xp: 0, lvl: 1, shellT: 15, bag: [], luckyT: 0,
     };
     t.s = SC.towerStats(kind, t.tiers);
+    return t;
+  }
+  placeTower(kind, x, y, free, id) {
+    const def = SC.TOWERS[kind];
+    if (!def || !this.canBuild(kind)) return null;
+    if (!free && this.money < def.cost) return null;
+    if (!this.canPlace(kind, x, y)) return null;
+    if (id == null) id = this.tid;
+    if (this.towerById(id)) return null;
+    this.tid = Math.max(this.tid, id + 1);
+    if (!free) this.money -= def.cost;
+    const t = this.newTower(kind, x, y, id);
     t.born = this.time;
     this.towers.push(t);
     this.stats.built++;
@@ -220,11 +277,13 @@ SC.Field = class Field {
     return Math.floor(t.spent * 0.7);
   }
   sell(t) {
+    if (this.towers.indexOf(t) < 0) return false;
     this.money += this.sellValue(t);
     this.towers.splice(this.towers.indexOf(t), 1);
     this.piles = this.piles.filter((p) => p.owner !== t.id);
     this.buffT = 0;
     this.addFx({ k: 'text', x: t.x, y: t.y, txt: '+' + this.sellValue(t), dur: 0.9, c: '#ffe14d' });
+    return true;
   }
 
   // ---------------- Zielsuche ----------------
@@ -288,11 +347,12 @@ SC.Field = class Field {
     for (const w of this.towers) {
       const s = w.s;
       const isW = w.kind === 'winker';
-      if (!isW && !s.auraCamo && !s.auraPierce && !s.auraRange && !s.auraDmg) continue;
+      if (!isW && !s.auraCamo && !s.auraPierce && !s.auraRange && !s.auraDmg && !s.teach) continue;
       const R = s.range;
       for (const o of this.towers) {
         if (o === w || SC.d2(o.x, o.y, w.x, w.y) > R * R) continue;
         const b = o.buff;
+        if (s.teach) b.speed = Math.max(b.speed, Math.min(s.teach2 ? 0.4 : 0.2, w.lvl * (s.teach2 ? 0.04 : 0.02)));
         if (isW) {
           b.speed = Math.max(b.speed, s.buffSpeed || 0);
           if (s.buffRange) b.range = Math.max(b.range, s.buffRange);
@@ -316,10 +376,12 @@ SC.Field = class Field {
     // Sends starten
     if (this.sendQueue.length && this.time >= this.sendBusyUntil) {
       const { send, mods } = this.sendQueue.shift();
-      for (let i = 0; i < send.count; i++) this.spawns.push({ at: this.time + i * send.spacing, type: send.type, camo: mods.camo, regrow: mods.regrow });
+      for (let i = 0; i < send.count; i++) this.spawns.push({ at: this.time + i * send.spacing, type: send.types ? send.types[i] : send.type, camo: !!mods.camo, regrow: !!mods.regrow });
       this.spawns.sort((a, b) => a.at - b.at);
       this.sendBusyUntil = this.time + send.count * send.spacing + 0.2;
+      this.curSend = { id: send.id, type: send.type, count: send.count, t0: this.time, t1: this.sendBusyUntil, camo: !!mods.camo, regrow: !!mods.regrow };
     }
+    if (this.curSend && this.time >= this.curSend.t1) this.curSend = null;
     // Spawns
     while (this.spawns.length && this.spawns[0].at <= this.time) {
       const sp = this.spawns.shift();
@@ -334,8 +396,10 @@ SC.Field = class Field {
       if (b.slowT > 0) b.slowT -= dt;
       let sp = b.def.speed * SC.SPEED * (b.slowT > 0 ? b.slowF : 1) * b.aura * this.rush;
       if (this.slowAllT > 0) sp *= b.def.moab ? 0.5 : this.slowAllF;
+      if (this.hexBoostT > 0) sp *= 1.4;
       if (b.frozen > 0 || b.stun > 0) sp = 0;
       if (b.markT > 0) b.markT -= dt;
+      if (b.soakT > 0) b.soakT -= dt;
       if (b.dotT > 0) {
         b.dotT -= dt;
         b.dotA += dt;
@@ -362,7 +426,14 @@ SC.Field = class Field {
       }
       if (b.dist >= P.len) {
         b.dead = true;
-        const lost = Math.max(1, Math.ceil(b.def.rbe - (b.def.hp - b.hp)));
+        let lost = Math.max(1, Math.ceil(b.def.rbe - (b.def.hp - b.hp)));
+        if (this.shieldT > 0 && this.shieldHp > 0) {
+          const blk = Math.min(lost, this.shieldHp);
+          this.shieldHp -= blk;
+          lost -= blk;
+          this.addFx({ k: 'ring', x: b.x, y: b.y, r: 30, dur: 0.4, c: '#58c4ff' });
+          if (lost <= 0) continue;
+        }
         this.lives -= lost;
         this.stats.leaked += lost;
         this.leakFlash = 0.45;
@@ -384,6 +455,15 @@ SC.Field = class Field {
     if (this.leakFlash > 0) this.leakFlash -= dt;
     if (this.gBoostT > 0) this.gBoostT -= dt;
     if (this.slowAllT > 0) this.slowAllT -= dt;
+    if (this.rageT > 0) this.rageT -= dt;
+    if (this.radarT > 0) this.radarT -= dt;
+    if (this.shieldT > 0) this.shieldT -= dt;
+    if (this.hexBoostT > 0) this.hexBoostT -= dt;
+    if (this.hexFogT > 0) {
+      this.hexFogT -= dt;
+      if (this.hexFogT <= 0) this.buffT = 0;
+    }
+    for (const p of this.powers) if (p.cd > 0) p.cd -= dt;
     // Buffs
     this.buffT -= dt;
     if (this.buffT <= 0) {
@@ -393,7 +473,7 @@ SC.Field = class Field {
     // Auren (Verlangsamung / Verwundbarkeit)
     for (const t of this.towers) {
       const s = t.s;
-      if (s.zone || s.moabSlow || s.permaSlow) {
+      if (s.zone || s.moabSlow || s.permaSlow || s.ebb) {
         const R = s.range;
         for (const b of this.bloons) {
           if (b.dead || !this.inRange(t, b, R)) continue;
@@ -403,6 +483,7 @@ SC.Field = class Field {
           }
           if (s.moabSlow && b.def.moab) b.aura = Math.min(b.aura, s.moabSlow);
           if (s.permaSlow) b.aura = Math.min(b.aura, b.def.moab ? 0.75 : s.permaSlow);
+          if (s.ebb && (!b.camo || s.camo)) b.aura = Math.min(b.aura, b.def.moab ? Math.max(0.85, s.ebb) : s.ebb);
         }
       }
     }
@@ -577,6 +658,70 @@ SC.Field = class Field {
       case 'bank':
         this.spawnCrate(t, Math.min(a.max, Math.floor(this.money * a.pct)), 'coin');
         break;
+      // ---- neue Türme ----
+      case 'cage': {
+        let best = null;
+        for (const b of vis) {
+          if (b.type === 'kraken') continue;
+          if (!best || b.def.rbe * 1000 + b.hp > best.def.rbe * 1000 + best.hp) best = b;
+        }
+        if (best) {
+          this.addFx({ k: 'net', x: best.x, y: best.y, r: best.def.r * 1.6, dur: 0.6 });
+          this.capture(best);
+          this.shipPost(t, [best.type], true);
+        }
+        break;
+      }
+      case 'mail':
+        this.shipPost(t, ['puffer'], true);
+        break;
+      case 'surge':
+        for (const b of vis) {
+          const k = b.type === 'kraken' ? 0.35 : 1;
+          b.dist = Math.max(0, b.dist - (b.def.moab ? a.moabPush * k : a.push));
+          if (!b.def.moab) b.stun = Math.max(b.stun, 1);
+        }
+        this.addFx({ k: 'flash', x: t.x, y: t.y, dur: 0.7, c: '#4fd6ff' });
+        if (this.local) SC.audio.whale();
+        break;
+      case 'moon':
+        for (const b of vis) {
+          b.slowF = b.def.moab ? 0.5 : 0.2;
+          b.slowT = Math.max(b.slowT, a.dur);
+          b.dotT = Math.max(b.dotT, a.dur);
+        }
+        this.addFx({ k: 'flash', x: t.x, y: t.y, dur: 0.7, c: '#dfe8ff' });
+        break;
+      case 'ancient':
+        this.explode(t.x, t.y, a.r, a.dmg, 'pure', 300, { moabMul: 3 }, '#ffcf8a');
+        this.addFx({ k: 'bigboom', x: t.x, y: t.y, r: a.r, dur: 0.7 });
+        if (this.local) SC.audio.boom();
+        break;
+      case 'bigmolt':
+        t.xp = Math.max(t.xp, SC.MOLT_XP[Math.min(SC.MOLT_XP.length - 1, t.lvl + 1)]);
+        t.boostT = a.dur;
+        t.boostMul = a.mul;
+        this.addFx({ k: 'ring', x: t.x, y: t.y, r: 60, dur: 0.6, c: '#ffd23f' });
+        break;
+      case 'lucky':
+        t.luckyT = a.dur;
+        this.addFx({ k: 'ring', x: t.x, y: t.y, r: 60, dur: 0.6, c: '#ffe14d' });
+        break;
+      case 'jackpot': {
+        let sum = 0;
+        const faces = [];
+        for (let i = 0; i < 3; i++) {
+          const r = 1 + this.rng.int(6);
+          faces.push(r);
+          sum += r;
+        }
+        this.money += sum * 50;
+        for (const b of vis) this.hit(b, sum * 2, 'pure', null);
+        this.addFx({ k: 'text', x: t.x, y: t.y - 34, txt: faces.join(' + ') + ' = ' + sum * 50, dur: 1.6, c: '#ffe14d' });
+        this.addFx({ k: 'flash', x: t.x, y: t.y, dur: 0.6, c: '#ffe14d' });
+        if (this.local) SC.audio.coin();
+        break;
+      }
     }
     if (this.local) SC.audio.ability();
     this.shake = Math.max(this.shake || 0, 0.3);
@@ -597,7 +742,7 @@ SC.Field = class Field {
         t.salvoN--;
         const vis = this.visibleBloons();
         if (!vis.length) continue;
-        const b = vis[Math.floor(Math.random() * vis.length)];
+        const b = vis[this.rng.int(vis.length)];
         const ang = Math.atan2(b.y - t.y, b.x - t.x);
         t.ang = ang;
         this.projs.push({ id: this.nid++, kind: 'cannon', x: t.x, y: t.y, vx: Math.cos(ang) * 520, vy: Math.sin(ang) * 520, r: 7, pierce: 1, dmg: 6, type: 'blast', life: 2.5, hits: new Set(), moabMul: 3, explode: { r: 60, pierce: 25 } });
@@ -609,7 +754,7 @@ SC.Field = class Field {
         t.stormT += t.stormI;
         t.stormN--;
         const P = this.path;
-        const d = P.visStart + Math.random() * (P.visEnd - P.visStart);
+        const d = P.visStart + this.rnd() * (P.visEnd - P.visStart);
         const L = P.pos(d, { x: 0, y: 0, a: 0 });
         this.projs.push({ id: this.nid++, kind: 'coco', mode: 'lob', x0: L.x - 80, y0: L.y - 200, x1: L.x, y1: L.y, x: L.x, y: L.y, t: 0, dur: 0.5, dmg: 6, type: 'pure', pierce: 30, aoe: 60, moabMul: 2, big: true, fire: true });
       }
@@ -617,19 +762,70 @@ SC.Field = class Field {
   }
 
   rateMul(t) {
-    return (1 + t.buff.speed) * (t.buff.dance ? 2 : 1) * (this.gBoostT > 0 ? 2 : 1) * (t.boostT > 0 ? t.boostMul : 1);
+    return (1 + t.buff.speed) * (t.buff.dance ? 2 : 1) * (this.gBoostT > 0 ? 2 : 1) * (t.boostT > 0 ? t.boostMul : 1) * (this.rageT > 0 ? 1.5 : 1);
+  }
+
+  // Flaschenpost: Blase verschwindet im Netz (zählt als gepoppt)
+  capture(b) {
+    b.dead = true;
+    this.stats.pops += b.def.rbe;
+    this.addFx({ k: 'pop', x: b.x, y: b.y, dur: 0.18, s: 0.7 });
+  }
+  shipPost(t, types, now) {
+    if (!now) {
+      for (const ty of types) t.bag.push(ty);
+      if (t.bag.length < t.s.cap) return;
+      types = t.bag;
+      t.bag = [];
+    }
+    this.addFx({ k: 'bottle', x: t.x, y: t.y, dur: 0.9 });
+    if (this.mode === 'classic') {
+      let v = 0;
+      for (const ty of types) v += SC.BLOONS[ty].rbe;
+      v = Math.min(v, 2500);
+      this.money += v;
+      this.addFx({ k: 'text', x: t.x, y: t.y - 26, txt: '+' + v, dur: 1, c: '#ffe14d' });
+      return;
+    }
+    this.emit('post', { types: types.slice(), mods: { camo: !!t.s.sendCamo, regrow: !!t.s.sendRegrow } });
+  }
+
+  // Würfelkrabbe: ein Wurf (1..6), deterministisch über den Feld-Zufall
+  rollDie(t, s) {
+    if (t.luckyT > 0) return 6;
+    let r = 1 + this.rng.int(6);
+    if (s.adv) r = Math.max(r, 1 + this.rng.int(6));
+    if (s.noOne) while (r === 1) r = 1 + this.rng.int(6);
+    return r;
+  }
+  throwDie(t, s, b, range, pierce, armorBreak, face) {
+    const crit = face === 6 || (s.crit5 && face === 5);
+    const dmg = face === 1 ? 0 : crit ? s.dmg * s.critMul : s.dmg + (face >= 4 ? 1 : 0);
+    const L = this.lead(b, s.speed, t.x, t.y);
+    const a = Math.atan2(L.y - t.y, L.x - t.x);
+    this.projs.push({
+      id: this.nid++, kind: 'die', x: t.x, y: t.y, vx: Math.cos(a) * s.speed, vy: Math.sin(a) * s.speed, r: 7, pierce: crit ? pierce + 2 : pierce, dmg, type: s.type,
+      life: (range * 1.4) / s.speed, hits: new Set(), armorBreak, a, face, crit, explode: crit ? s.critBoom : null, moabMul: crit ? 2 : 1,
+    });
+    if (crit && s.chips) {
+      this.money += s.chips;
+      this.addFx({ k: 'text', x: t.x, y: t.y - 24, txt: '+' + s.chips, dur: 0.8, c: '#ffe14d' });
+    }
+    return crit;
   }
 
   updateTower(t, dt) {
-    const s = t.sx || t.s;
+    let s = t.sx || t.s;
     if (t.ab && t.ab.cd > 0) t.ab.cd -= dt;
     if (t.boostT > 0) t.boostT -= dt;
+    if (t.luckyT > 0) t.luckyT -= dt;
     this.updateAbilityFx(t, dt);
     const mul = this.rateMul(t);
     t.anim = Math.max(0, t.anim - dt * 4);
     t.cd -= dt * mul;
-    const range = (s.range || 0) * (1 + t.buff.range);
-    const camo = !!(s.camo || t.buff.camo);
+    let range = (s.range || 0) * (1 + t.buff.range);
+    if (this.hexFogT > 0 && !s.global) range *= 0.7;
+    const camo = !!(s.camo || t.buff.camo || this.radarT > 0 || (t.kind === 'molt' && t.lvl >= 5));
     const pierce = (s.pierce || 1) + t.buff.pierce;
     const armorBreak = t.buff.armor;
     const face = (x, y) => (t.ang = Math.atan2(y - t.y, x - t.x));
@@ -748,7 +944,7 @@ SC.Field = class Field {
           const dur = SC.clamp(d / 380, 0.35, 1.0);
           const bs = b.frozen > 0 || b.stun > 0 ? 0 : b.def.speed * SC.SPEED * (b.slowT > 0 ? b.slowF : 1) * b.aura * this.rush;
           const L = this.path.pos(b.dist + bs * dur, { x: 0, y: 0, a: 0 });
-          const jx = k ? (Math.random() - 0.5) * 30 : 0, jy = k ? (Math.random() - 0.5) * 30 : 0;
+          const jx = k ? (this.rnd() - 0.5) * 30 : 0, jy = k ? (this.rnd() - 0.5) * 30 : 0;
           if (k === 0) face(L.x, L.y);
           this.projs.push({
             id: this.nid++, kind: 'coco', mode: 'lob', x0: t.x, y0: t.y, x1: L.x + jx, y1: L.y + jy, x: t.x, y: t.y, t: -k * 0.08, dur,
@@ -774,8 +970,8 @@ SC.Field = class Field {
         t.cd = s.rate;
         t.anim = 1;
         t.cnt++;
-        const i = t.pathPts[Math.floor(Math.random() * t.pathPts.length)];
-        const jx = (Math.random() - 0.5) * SC.PATH_W * 0.5, jy = (Math.random() - 0.5) * SC.PATH_W * 0.5;
+        const i = t.pathPts[this.rng.int(t.pathPts.length)];
+        const jx = (this.rnd() - 0.5) * SC.PATH_W * 0.5, jy = (this.rnd() - 0.5) * SC.PATH_W * 0.5;
         const isMine = s.mine && t.cnt % (s.mineEvery || 3) === 0;
         this.piles.push({
           id: this.nid++, owner: t.id, x: this.path.xs[i] + jx, y: this.path.ys[i] + jy, sx: t.x, sy: t.y, fly: 0,
@@ -860,7 +1056,7 @@ SC.Field = class Field {
       }
       case 'krill': {
         const nd = s.count + (t.extraT > 0 ? t.extraN : 0);
-        while (t.drones.length < nd) t.drones.push({ x: t.x + (Math.random() - 0.5) * 20, y: t.y + (Math.random() - 0.5) * 20, a: 0, cd: 0, tgt: null, ph: Math.random() * 6 });
+        while (t.drones.length < nd) t.drones.push({ x: t.x + (this.rnd() - 0.5) * 20, y: t.y + (this.rnd() - 0.5) * 20, a: 0, cd: 0, tgt: null, ph: this.rnd() * 6 });
         if (t.drones.length > nd) t.drones.length = nd;
         const o = { moabMul: s.moabMul, slow: s.slow, armorBreak };
         for (const d of t.drones) {
@@ -915,6 +1111,121 @@ SC.Field = class Field {
             } else t.whaleT = 2;
           }
         }
+        break;
+      }
+      case 'post': {
+        if (t.cd > 0) break;
+        const cand = [];
+        for (const b of this.bloons) {
+          if (b.dead || b.def.moab || b.def.idx > s.catchMax || (b.camo && !camo)) continue;
+          if (b.dist < this.path.visStart || !this.inRange(t, b, range)) continue;
+          cand.push(b);
+        }
+        if (!cand.length) break;
+        if (cand.length > s.catchN) {
+          cand.sort((a, b) => this.score(b, t.target, t) - this.score(a, t.target, t));
+          cand.length = s.catchN;
+        }
+        t.cd = s.rate;
+        t.anim = 1;
+        face(cand[0].x, cand[0].y);
+        const got = [];
+        for (const b of cand) {
+          got.push(b.type);
+          this.addFx({ k: 'net', x: b.x, y: b.y, r: b.def.r * 1.4, dur: 0.4 });
+          this.capture(b);
+        }
+        this.shipPost(t, got, false);
+        if (this.local) SC.audio.whoosh();
+        break;
+      }
+      case 'tide': {
+        if (t.cd > 0) break;
+        const hitList = [];
+        for (const b of this.bloons) {
+          if (b.dead || (b.camo && !camo) || b.dist < this.path.visStart || !this.inRange(t, b, range)) continue;
+          hitList.push(b);
+        }
+        if (!hitList.length) break;
+        t.cd = s.rate;
+        t.anim = 1;
+        for (const b of hitList) {
+          let pushed = false;
+          if (b.def.moab) {
+            if (s.moabPush) {
+              b.dist = Math.max(0, b.dist - s.moabPush * (b.type === 'kraken' ? 0.35 : 1));
+              pushed = true;
+            }
+          } else if (b.pushes < s.maxPush) {
+            b.dist = Math.max(0, b.dist - s.push);
+            b.pushes++;
+            pushed = true;
+          }
+          if (pushed && s.soak) b.soakT = s.soak;
+          if (s.dmg) this.hit(b, s.dmg, 'punch', { armorBreak });
+        }
+        this.addFx({ k: 'tide', x: t.x, y: t.y, r: range, dur: 0.6 });
+        if (this.local) SC.audio.whoosh();
+        break;
+      }
+      case 'molt': {
+        // Level aus Erfahrung, Mindest-Level durch Uralter Hummer
+        if (s.minLvl && t.lvl < s.minLvl) t.xp = Math.max(t.xp, SC.MOLT_XP[s.minLvl - 1]);
+        const lvl = SC.moltLevel(t.xp);
+        if (lvl > t.lvl) {
+          t.lvl = lvl;
+          this.buffT = 0;
+          this.addFx({ k: 'text', x: t.x, y: t.y - 28, txt: 'LEVEL ' + lvl + '!', dur: 1.1, c: '#ffd23f' });
+          this.addFx({ k: 'ring', x: t.x, y: t.y, r: 36, dur: 0.5, c: '#ff9a5a' });
+          if (s.shells) this.dropShell(t, range);
+        }
+        if (s.shells) {
+          t.shellT -= dt;
+          if (t.shellT <= 0) {
+            t.shellT = 15;
+            this.dropShell(t, range);
+          }
+        }
+        if (t.cd > 0) break;
+        const L = t.lvl - 1;
+        const r2 = range + L * 4;
+        const list = this.findTargets(t, r2, camo, s.pierce);
+        if (!list.length) break;
+        t.cd = s.rate * Math.max(0.46, 1 - L * 0.06);
+        t.anim = 1;
+        face(list[0].x, list[0].y);
+        const dmg = s.dmg + Math.floor(t.lvl / 3);
+        const o = { moabMul: s.moabMul, armorBreak };
+        for (const b of list) {
+          if (this.hit(b, dmg, s.type, o)) t.xp += dmg * s.xpMul;
+          this.addFx({ k: 'punch', x: b.x, y: b.y, dur: 0.15 });
+        }
+        if (this.local) SC.audio.punch();
+        break;
+      }
+      case 'dice': {
+        if (t.cd > 0) break;
+        const b = this.findTarget(t, range, camo);
+        if (!b) break;
+        t.cd = s.rate * (t.luckyT > 0 ? 0.5 : 1);
+        t.anim = 1;
+        t.cnt++;
+        face(b.x, b.y);
+        let n = s.count, extra = 0;
+        for (let k = 0; k < n; k++) {
+          const crit = this.throwDie(t, s, b, range, pierce, armorBreak, this.rollDie(t, s));
+          if (crit && s.chain && extra < 3) {
+            extra++;
+            n++;
+          }
+        }
+        if (s.jackpot && t.cnt % s.jackpot === 0) {
+          this.money += 150;
+          this.addFx({ k: 'text', x: t.x, y: t.y - 30, txt: 'JACKPOT +150', dur: 1.3, c: '#ffe14d' });
+          this.projs.push({ id: this.nid++, kind: 'die', mode: 'lob', x0: t.x, y0: t.y, x1: b.x, y1: b.y, x: t.x, y: t.y, t: 0, dur: 0.5, dmg: 10, type: 'pure', pierce: 60, aoe: 90, face: 6, big: true });
+          if (this.local) SC.audio.coin();
+        }
+        if (this.local) SC.audio.whoosh();
         break;
       }
       case 'farm': {
@@ -1061,8 +1372,193 @@ SC.Field = class Field {
     }
   }
   spawnCrate(t, val, kind) {
+    // Position ist nur Optik (Math.random), Einsammeln läuft über die ID
     const a = Math.random() * Math.PI * 2, r = 24 + Math.random() * 18;
-    this.crates.push({ x0: t.x, y0: t.y, x: t.x, y: t.y, tx: SC.clamp(t.x + Math.cos(a) * r, 12, SC.W - 12), ty: SC.clamp(t.y + Math.sin(a) * r, 12, SC.H - 12), val, kind, t: 0, auto: t.s.market ? 0.8 : 2.4, done: false });
+    this.crates.push({ id: this.cid++, x0: t.x, y0: t.y, x: t.x, y: t.y, tx: SC.clamp(t.x + Math.cos(a) * r, 12, SC.W - 12), ty: SC.clamp(t.y + Math.sin(a) * r, 12, SC.H - 12), val, kind, t: 0, auto: t.s.market ? 0.8 : 2.4, done: false });
+  }
+  crateAt(x, y) {
+    for (const c of this.crates) if (!c.done && c.t > 0.3 && SC.d2(x, y, c.tx, c.ty) < 26 * 26) return c;
+    return null;
+  }
+  collectById(id) {
+    for (const c of this.crates) {
+      if (c.id === id && !c.done && c.t > 0.3) {
+        this.collectCrate(c);
+        return true;
+      }
+    }
+    return false;
+  }
+  // Häutungs-Hummer B2: alte Schale als Falle auf die Strecke
+  dropShell(t, range) {
+    const P = this.path;
+    let bi = -1, bd = Infinity;
+    for (let i = 0; i < P.n; i += 3) {
+      const x = P.xs[i], y = P.ys[i];
+      if (x < 0 || y < 0 || x > SC.W || y > SC.H) continue;
+      const d = SC.d2(x, y, t.x, t.y);
+      if (d < bd && d <= range * range * 1.6) {
+        bd = d;
+        bi = i;
+      }
+    }
+    if (bi < 0) return;
+    this.piles.push({ id: this.nid++, owner: t.id, x: P.xs[bi], y: P.ys[bi], sx: t.x, sy: t.y, fly: 0, pierce: 20, maxP: 20, dmg: 2, type: 'punch', life: 30, big: true, shell: true, hits: new Set() });
+  }
+
+  // ---------------- Kräfte (Battle-Powers) ----------------
+  powerState(i, round) {
+    const p = this.powers[i];
+    if (!p) return { ok: false, why: 'none' };
+    const def = SC.POWER_BY_ID[p.id];
+    if (round < def.round) return { ok: false, why: 'round', def, p };
+    if (p.cd > 0) return { ok: false, why: 'cd', def, p };
+    if (this.money < def.cost) return { ok: false, why: 'money', def, p };
+    return { ok: true, def, p };
+  }
+  usePower(i, x, y, round) {
+    const st = this.powerState(i, round);
+    if (!st.ok) return false;
+    const def = st.def;
+    if (def.target === 'map' && !(x >= 0 && y >= 0 && x <= SC.W && y <= SC.H)) return false;
+    this.money -= def.cost;
+    st.p.cd = def.cd;
+    const vis = this.visibleBloons();
+    switch (def.id) {
+      case 'spikes': {
+        const P = this.path;
+        let bi = 0, bd = Infinity;
+        for (let k = 0; k < P.n; k += 2) {
+          const d = SC.d2(x, y, P.xs[k], P.ys[k]);
+          if (d < bd) {
+            bd = d;
+            bi = k;
+          }
+        }
+        this.piles.push({ id: this.nid++, owner: 0, x: P.xs[bi], y: P.ys[bi], sx: x, sy: y - 40, fly: 0, pierce: 60, maxP: 60, dmg: 1, type: 'sharp', life: 45, big: true, urchin: true, hits: new Set() });
+        break;
+      }
+      case 'bomb':
+        this.explode(x, y, 85, 20, 'pure', 120, { moabMul: 3 }, '#ffb35c');
+        this.addFx({ k: 'bigboom', x, y, r: 110, dur: 0.6 });
+        this.shake = Math.max(this.shake || 0, 0.3);
+        if (this.local) SC.audio.boom();
+        break;
+      case 'cash': {
+        const v = 150 + 15 * Math.max(0, round);
+        this.money += v;
+        this.addFx({ k: 'text', x: SC.W / 2, y: SC.H / 2, txt: '+' + v, dur: 1.2, c: '#ffe14d' });
+        if (this.local) SC.audio.coin();
+        break;
+      }
+      case 'freeze':
+        for (const b of vis) {
+          if (b.def.moab) {
+            b.slowF = Math.min(b.slowT > 0 ? b.slowF : 1, 0.6);
+            b.slowT = Math.max(b.slowT, 3);
+          } else if (b.type !== 'ice' && b.type !== 'stripe') b.frozen = Math.max(b.frozen, 3);
+        }
+        this.addFx({ k: 'flash', x: SC.W / 2, y: SC.H / 2, dur: 0.6, c: '#bfefff' });
+        if (this.local) SC.audio.freeze(false);
+        break;
+      case 'rage':
+        this.rageT = 8;
+        break;
+      case 'shield':
+        this.shieldT = 8;
+        this.shieldHp = 40;
+        break;
+      case 'radar':
+        this.radarT = 15;
+        break;
+      case 'heal':
+        this.lives = Math.min(this.maxLives, this.lives + 20);
+        this.addFx({ k: 'text', x: SC.W / 2, y: SC.H / 2, txt: '+20 Leben', dur: 1.2, c: '#ff8ac4' });
+        break;
+      case 'boost':
+      case 'fog':
+        this.emit('hex', { id: def.id, dur: def.dur });
+        break;
+    }
+    if (this.local) SC.audio.ability();
+    if (this.game && this.game.notify) this.game.notify('power', { field: this, def });
+    return true;
+  }
+
+  // ---------------- Zustand speichern/laden (Server-Resync) ----------------
+  // Kopiert nur einfache Werte (Zahlen, Text, Listen aus einfachen Werten)
+  static plain(o, skip) {
+    const r = {};
+    for (const k in o) {
+      if (skip && skip[k]) continue;
+      const v = o[k];
+      if (v === null || typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') r[k] = v;
+      else if (Array.isArray(v) && v.every((x) => x === null || typeof x !== 'object')) r[k] = v.slice();
+    }
+    return r;
+  }
+  serialize() {
+    const P = SC.Field.plain;
+    const skip = { mode: 1, name: 1, local: 1, headless: 1 };
+    return {
+      f: P(this, skip),
+      rng: this.rng.a,
+      allowed: this.allowed,
+      powers: this.powers.map((p) => ({ id: p.id, cd: p.cd })),
+      bloons: this.bloons.filter((b) => !b.dead).map((b) => P(b, { x: 1, y: 1, a: 1 })),
+      towers: this.towers.map((t) => Object.assign(P(t), { ab: t.ab ? t.ab.cd : null })),
+      spawns: this.spawns.map((s) => P(s)),
+      queue: this.sendQueue.map((q) => ({ id: q.send.id, types: q.send.types || null, mods: { camo: !!q.mods.camo, regrow: !!q.mods.regrow } })),
+      piles: this.piles.filter((p) => !p.dead).map((p) => Object.assign(P(p), { mine: p.mine || null })),
+      crates: this.crates.filter((c) => !c.done).map((c) => P(c)),
+      cur: this.curSend ? P(this.curSend) : null,
+    };
+  }
+  restore(d) {
+    Object.assign(this, d.f);
+    this.rng.a = d.rng;
+    this.allowed = d.allowed;
+    this.powers = d.powers.map((p) => ({ id: p.id, cd: p.cd }));
+    this.bloons = d.bloons.map((b) => {
+      const o = Object.assign({}, b, { def: SC.BLOONS[b.type], x: 0, y: 0, a: 0 });
+      this.path.pos(o.dist, this._p);
+      o.x = this._p.x;
+      o.y = this._p.y;
+      o.a = this._p.a;
+      return o;
+    });
+    this.towers = d.towers.map((td) => {
+      const t = this.newTower(td.kind, td.x, td.y, td.id);
+      Object.assign(t, td);
+      t.tiers = td.tiers.slice();
+      t.s = SC.towerStats(t.kind, t.tiers);
+      t.ab = null;
+      for (let p = 0; p < 2; p++) if (t.tiers[p] >= SC.MAX_TIER) t.ab = { def: t.def.paths[p][SC.MAX_TIER - 1].ability, cd: td.ab || 0 };
+      t.pathPts = null;
+      return t;
+    });
+    this.spawns = d.spawns.map((s) => Object.assign({}, s));
+    this.sendQueue = d.queue.map((q) => {
+      if (q.types) return { send: { id: 'post', types: q.types, type: q.types[0], count: q.types.length, spacing: q.types.some((t) => SC.BLOONS[t].moab) ? 1.2 : 0.22 }, mods: q.mods };
+      return { send: SC.SENDS.find((s) => s.id === q.id), mods: q.mods };
+    });
+    this.piles = d.piles.map((p) => Object.assign({}, p, { hits: new Set() }));
+    this.crates = d.crates.map((c) => Object.assign({}, c));
+    this.curSend = d.cur ? Object.assign({}, d.cur) : null;
+    this.projs = [];
+    this.whales = [];
+    this.fx = [];
+    this.buffT = 0;
+  }
+  // kurze Prüfsumme der Blasen (Abweichung Client/Server erkennen)
+  bloonSum() {
+    let n = 0, r = 0;
+    for (const b of this.bloons) {
+      if (b.dead) continue;
+      n++;
+      r += b.def.rbe;
+    }
+    return n * 100000 + r;
   }
   collectCrate(c) {
     if (c.done) return;

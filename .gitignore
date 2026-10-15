@@ -4,3 +4,9 @@ Thumbs.db
 promo/*.mp4
 promo/*.webm
 .claude/
+server/node_modules/
+server/data/
+*.db
+*.db-wal
+*.db-shm
+.env

@@ -1,6 +1,6 @@
 // Service Worker: macht das Spiel offline spielbar.
 // Bei jeder Änderung am Spiel die Versionsnummer erhöhen!
-const CACHE = 'scherenschlacht-v4';
+const CACHE = 'scherenschlacht-v6';
 const FILES = [
   './',
   './index.html',
@@ -8,18 +8,22 @@ const FILES = [
   './css/style.css',
   './js/util.js',
   './js/data.js',
+  './js/path.js',
   './js/draw.js',
   './js/towers.js',
+  './js/towers-new.js',
   './js/hero.js',
   './js/maps.js',
   './js/icons.js',
   './js/render.js',
   './js/audio.js',
   './js/field.js',
+  './js/ghost.js',
   './js/ai.js',
   './js/net.js',
   './js/game.js',
   './js/ui.js',
+  './js/menu-online.js',
   './js/main.js',
   './icons/icon-180.png',
   './icons/icon-192.png',
@@ -42,6 +46,8 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   const own = url.origin === self.location.origin;
+  // Server-Schnittstelle nie aus dem Cache (Konto, Rangliste, Live-Daten)
+  if (own && (url.pathname.includes('/api/') || url.pathname.endsWith('/ws'))) return;
   if (own) {
     e.respondWith(
       fetch(req)

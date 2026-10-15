@@ -1,12 +1,13 @@
 'use strict';
 // ============================================================
-//  Titelbild, Setup, Online-Lobby, Lexikon, Start
+//  Titelbild, Setup, Ausrüstung, Vorrunde (Würfel), Direkt-Duell, Lexikon
 // ============================================================
 SC.Menu = {
   setup: { mode: 'ai', map: 'bucht', diff: 'normal' },
   onlineMap: 'bucht',
 
   init() {
+    this.loadout = SC.checkLoadout(SC.store.get('loadout', null)) || SC.checkLoadout(SC.DEFAULT_LOADOUT);
     for (const b of document.querySelectorAll('[data-go]')) {
       b.addEventListener('click', () => {
         SC.audio.init();
@@ -37,12 +38,20 @@ SC.Menu = {
     document.addEventListener('keydown', unlock);
     SC.$('#btn-play').addEventListener('click', () => {
       SC.audio.init();
-      this.stopBg();
-      SC.UI.start(Object.assign({}, this.setup));
+      const cfg = Object.assign({}, this.setup);
+      if (cfg.mode === 'classic') {
+        this.stopBg();
+        cfg.loadout = { towers: null, powers: this.loadout.powers.slice() };
+        SC.UI.start(cfg);
+      } else this.preAI(cfg);
     });
     SC.$('#btn-host').addEventListener('click', () => this.host());
     SC.$('#btn-join').addEventListener('click', () => this.join());
+    SC.$('#btn-reroll').addEventListener('click', () => this.preReroll());
+    SC.$('#btn-ready').addEventListener('click', () => this.preReady());
+    SC.$('#pre-back').addEventListener('click', () => this.preBack());
     SC.paintIcons(document);
+    if (SC.Online) SC.Online.init();
 
     const standalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
     if (/iPhone|iPad|iPod/.test(navigator.userAgent) && !standalone) SC.$('#install-hint').classList.remove('hidden');
@@ -76,6 +85,7 @@ SC.Menu = {
         this.net.close();
         this.net = null;
       }
+      if (SC.Online) SC.Online.leaveLobby();
       SC.showScreen('title');
       this.drawTitleArt();
       this.startBg();
@@ -93,10 +103,24 @@ SC.Menu = {
       this.renderMaps('#map-list-online', this.onlineMap, (id) => (this.onlineMap = id));
       SC.$('#online-status').innerHTML = '';
       SC.showScreen('online');
+      if (SC.Online) SC.Online.open();
     } else if (where === 'lexikon') {
       this.renderLexikon();
       SC.showScreen('lexikon');
+    } else if (where === 'loadout') {
+      const body = SC.$('#loadout-body');
+      const draft = { towers: this.loadout.towers.slice(), powers: this.loadout.powers.slice() };
+      this.editor(body, draft, (lo) => {
+        const ok = SC.checkLoadout(lo);
+        if (ok) this.saveLoadout(ok);
+      });
+      SC.showScreen('loadout');
     }
+  },
+  saveLoadout(lo) {
+    this.loadout = lo;
+    SC.store.set('loadout', lo);
+    if (SC.Online) SC.Online.saveLoadout(lo);
   },
 
   mapThumb(map) {
@@ -134,7 +158,208 @@ SC.Menu = {
     }
   },
 
-  // ---------------- Online ----------------
+  // ---------------- Ausrüstungs-Editor (3 Türme + 3 Kräfte) ----------------
+  // lo wird direkt verändert; onChange bekommt den neuen Stand
+  editor(el, lo, onChange, opts) {
+    opts = opts || {};
+    const render = () => {
+      let h = '<h3>Türme <small>3 wählen – der 4. kommt vom Würfel</small></h3><div class="lo-grid">';
+      for (const k of SC.TOWER_ORDER) {
+        const d = SC.TOWERS[k];
+        const i = lo.towers.indexOf(k);
+        const isDice = (typeof opts.dice === 'function' ? opts.dice() : opts.dice) === k;
+        h += '<button class="lo-card' + (i >= 0 ? ' on' : '') + (isDice ? ' isdice' : '') + '" data-t="' + k + '"><img src="' + SC.towerIcon(k, 48) + '" alt=""><b>' + d.short + '</b><span class="price">' + d.cost + '</span>' +
+          (i >= 0 ? '<span class="lo-n">' + (i + 1) + '</span>' : '') + (isDice ? '<span class="lo-n dice">' + SC.ICON.dice(6) + '</span>' : '') + (SC.NEW_TOWERS[k] ? '<span class="lo-new">NEU</span>' : '') + '</button>';
+      }
+      h += '</div><h3>Kräfte <small>3 wählen – im Spiel gegen Muscheln einsetzbar</small></h3><div class="lo-grid powers">';
+      for (const p of SC.POWERS) {
+        const i = lo.powers.indexOf(p.id);
+        h += '<button class="lo-card pw' + (i >= 0 ? ' on' : '') + '" data-p="' + p.id + '">' + SC.ICON.power(p.id) + '<b>' + p.name + '</b><span class="price">' + (p.cost || 'gratis') + '</span>' + (i >= 0 ? '<span class="lo-n">' + (i + 1) + '</span>' : '') + (p.target === 'opp' ? '<span class="lo-new atk">Angriff</span>' : '') + '</button>';
+      }
+      h += '</div><div class="lo-info" id="lo-info">' + (this.loInfo || 'Tippe auf einen Turm oder eine Kraft, um sie aus- oder abzuwählen.') + '</div>';
+      el.innerHTML = h;
+    };
+    const info = (html) => {
+      this.loInfo = html;
+      const e = el.querySelector('.lo-info');
+      if (e) e.innerHTML = html;
+    };
+    el.onclick = (e) => {
+      const b = e.target.closest('.lo-card');
+      if (!b || (opts.locked && opts.locked())) return;
+      SC.audio.click();
+      if (b.dataset.t) {
+        const k = b.dataset.t, d = SC.TOWERS[k];
+        const i = lo.towers.indexOf(k);
+        if (i >= 0) lo.towers.splice(i, 1);
+        else {
+          if (lo.towers.length >= SC.LOADOUT.towers) lo.towers.shift();
+          lo.towers.push(k);
+        }
+        this.loInfo = '<b>' + d.name + '</b> (' + d.cost + '): ' + d.desc;
+      } else {
+        const id = b.dataset.p, p = SC.POWER_BY_ID[id];
+        const i = lo.powers.indexOf(id);
+        if (i >= 0) lo.powers.splice(i, 1);
+        else {
+          if (lo.powers.length >= SC.LOADOUT.powers) lo.powers.shift();
+          lo.powers.push(id);
+        }
+        this.loInfo = '<b>' + p.name + '</b> – ' + p.desc + ' Kosten ' + (p.cost || 'keine') + ', Abklingzeit ' + p.cd + ' s, ab Runde ' + p.round + '.';
+      }
+      render();
+      info(this.loInfo + (SC.checkLoadout(lo) ? '' : ' <span class="warn">Wähle genau 3 Türme und 3 Kräfte.</span>'));
+      onChange(lo);
+    };
+    this.loInfo = '';
+    render();
+    return { render };
+  },
+
+  // ---------------- Vorrunde: Würfel-Turm & Ausrüstung ----------------
+  // o: { mode: 'ai'|'p2p'|'server', map, opp, onStart(loadoutMitWürfel), onBack }
+  openPre(o) {
+    this.stopBg();
+    const pre = (this.pre = Object.assign({ ready: false, oppReady: false, rerolls: SC.LOADOUT.rerolls }, o));
+    pre.lo = { towers: this.loadout.towers.slice(), powers: this.loadout.powers.slice() };
+    if (o.mode !== 'server') pre.dice = SC.rollDice(pre.lo.towers);
+    this.preEditor = this.editor(SC.$('#pre-edit'), pre.lo, (lo) => this.preChanged(lo), { dice: () => pre.dice, locked: () => pre.ready });
+    SC.$('#pre-status').textContent = '';
+    this.preRender(true);
+    SC.showScreen('prematch');
+    clearInterval(this.preT);
+    this.preT = setInterval(() => this.preTick(), 250);
+  },
+  preChanged(lo) {
+    const pre = this.pre;
+    if (!SC.checkLoadout(lo)) return this.preRender();
+    this.saveLoadout(SC.checkLoadout(lo));
+    if (pre.mode === 'server') pre.net.send({ t: 'pre.loadout', loadout: SC.checkLoadout(lo) });
+    else if (lo.towers.indexOf(pre.dice) >= 0) {
+      pre.dice = SC.rollDice(lo.towers);
+      this.preRender(true);
+      return;
+    }
+    this.preRender();
+  },
+  // Server meldet den Stand der Vorrunde
+  preUpdate(m) {
+    const pre = this.pre;
+    if (!pre || pre.mode !== 'server') return;
+    const rolled = m.me.dice !== pre.dice;
+    pre.dice = m.me.dice;
+    pre.rerolls = m.me.rerolls;
+    pre.ready = m.me.ready;
+    pre.oppReady = m.opp.ready;
+    pre.deadline = m.deadline;
+    pre.opp = m.opp;
+    const lo = SC.checkLoadout(m.me.loadout);
+    if (lo && (lo.towers.join() !== pre.lo.towers.join() || lo.powers.join() !== pre.lo.powers.join())) {
+      pre.lo.towers = lo.towers;
+      pre.lo.powers = lo.powers;
+    }
+    this.preRender(rolled);
+  },
+  preRender(rolled) {
+    const pre = this.pre;
+    if (!pre) return;
+    const lo = pre.lo;
+    SC.$('#pre-slots').innerHTML =
+      lo.towers.map((k) => '<div class="pslot"><img src="' + SC.towerIcon(k, 48) + '" alt=""><b>' + SC.TOWERS[k].short + '</b></div>').join('') +
+      '<div class="pslot pw">' + lo.powers.map((id) => '<span title="' + SC.esc(SC.POWER_BY_ID[id].name) + '">' + SC.ICON.power(id) + '</span>').join('') + '</div>';
+    const card = SC.$('#dice-card');
+    const showTower = () => {
+      card.classList.remove('rolling');
+      card.innerHTML = pre.dice ? '<img src="' + SC.towerIcon(pre.dice, 64) + '" alt=""><b>' + SC.TOWERS[pre.dice].short + '</b><span class="dmark">' + SC.ICON.dice(6) + '</span>' : '';
+    };
+    if (rolled && pre.dice) {
+      card.classList.add('rolling');
+      card.innerHTML = '<span class="dspin">' + SC.ICON.dice(1 + Math.floor(Math.random() * 6)) + '</span>';
+      SC.audio.click();
+      clearTimeout(this.diceT);
+      this.diceT = setTimeout(showTower, 650);
+    } else if (!card.classList.contains('rolling')) showTower();
+    const rb = SC.$('#btn-reroll');
+    rb.querySelector('span').textContent = 'Neu würfeln (' + pre.rerolls + ')';
+    rb.disabled = pre.rerolls <= 0 || pre.ready;
+    const ok = !!SC.checkLoadout(lo);
+    const ready = SC.$('#btn-ready');
+    ready.disabled = !ok || pre.ready;
+    ready.lastChild.textContent = pre.ready ? 'Warte …' : 'Bereit!';
+    const opp = pre.opp;
+    SC.$('#pre-vs').innerHTML = opp ? 'gegen <b>' + SC.esc(opp.name) + '</b>' + (opp.guest ? ' <small>(Gast)</small>' : opp.rating != null ? ' <small>(' + opp.rating + ')</small>' : '') + (pre.oppReady ? ' <span class="okmark">bereit</span>' : '') : '';
+    if (this.preEditor) this.preEditor.render();
+    SC.$('#pre-edit').classList.toggle('locked', pre.ready);
+  },
+  preTick() {
+    const pre = this.pre;
+    if (!pre || !SC.$('#prematch').classList.contains('active')) return clearInterval(this.preT);
+    const el = SC.$('#pre-clock');
+    if (pre.deadline) {
+      const now = pre.net && pre.net.serverNow ? pre.net.serverNow() : Date.now();
+      const s = Math.max(0, Math.ceil((pre.deadline - now) / 1000));
+      el.textContent = s + ' s';
+      el.classList.toggle('urgent', s <= 5);
+    } else el.textContent = '';
+  },
+  preReroll() {
+    const pre = this.pre;
+    if (!pre || pre.ready || pre.rerolls <= 0) return SC.audio.error();
+    if (pre.mode === 'server') return pre.net.send({ t: 'pre.reroll' });
+    pre.rerolls--;
+    pre.dice = SC.rollDice(pre.lo.towers, Math.random, pre.dice);
+    this.preRender(true);
+  },
+  preReady() {
+    const pre = this.pre;
+    if (!pre || pre.ready) return;
+    const lo = SC.checkLoadout(pre.lo);
+    if (!lo) return SC.audio.error();
+    SC.audio.click();
+    pre.ready = true;
+    this.preRender();
+    if (pre.mode === 'server') return pre.net.send({ t: 'pre.ready' });
+    if (pre.mode === 'p2p') {
+      pre.net.send({ t: 'ready', name: this.playerName() });
+      SC.$('#pre-status').textContent = pre.oppReady ? '' : 'Warte auf deinen Gegner …';
+    }
+    this.preMaybeStart();
+  },
+  preMaybeStart() {
+    const pre = this.pre;
+    if (!pre.ready || (pre.mode === 'p2p' && !pre.oppReady)) return;
+    clearInterval(this.preT);
+    const full = { towers: pre.lo.towers.concat([pre.dice]), powers: pre.lo.powers.slice() };
+    this.pre = null;
+    pre.onStart(full);
+  },
+  preBack() {
+    const pre = this.pre;
+    SC.audio.click();
+    clearInterval(this.preT);
+    this.pre = null;
+    if (pre && pre.onBack) pre.onBack();
+  },
+  playerName() {
+    return (SC.Online && SC.Online.name) || 'Du';
+  },
+
+  // ---------------- Duell gegen KI ----------------
+  preAI(cfg) {
+    this.openPre({
+      mode: 'ai',
+      map: cfg.map,
+      opp: { name: { easy: 'Krabbel-KI', normal: 'Hummer-KI', hard: 'Kraken-KI' }[cfg.diff] },
+      onStart: (lo) => SC.UI.start(Object.assign({}, cfg, { loadout: lo, name: 'Du' })),
+      onBack: () => this.go('setup-ai'),
+    });
+  },
+  again(cfg) {
+    SC.UI.quit();
+    this.preAI(Object.assign({}, cfg));
+  },
+
+  // ---------------- Direkt-Duell (P2P, ohne eigenen Server) ----------------
   status(html) {
     SC.$('#online-status').innerHTML = html;
   },
@@ -142,46 +367,77 @@ SC.Menu = {
     SC.audio.init();
     if (this.net) this.net.close();
     const net = (this.net = new SC.Net());
-    this.status('Verbinde mit dem Server …');
+    this.status('Verbinde …');
     try {
       await net.host(
-        (code) => this.status('Dein Raumcode: <span class="code">' + code + '</span><br>Warte auf Gegner …'),
+        (code) => this.status('Dein Code: <span class="code">' + code + '</span><br>Warte auf Gegner …'),
         () => {
           const map = this.onlineMap;
           net.send({ t: 'start', map });
-          this.launchOnline(map);
+          this.preP2P(net, map);
         },
-        (e) => this.status('Fehler: ' + (e.type || e.message || e))
+        (e) => this.status('Fehler: ' + SC.esc(e.type || e.message || e))
       );
     } catch (e) {
-      this.status(e.message);
+      this.status(SC.esc(e.message));
     }
   },
   async join() {
     SC.audio.init();
     const code = SC.$('#join-code').value.trim().toUpperCase();
-    if (code.length !== 4) return this.status('Bitte den 4-stelligen Code eingeben.');
+    if (!/^[A-Z0-9]{4}$/.test(code)) return this.status('Bitte den 4-stelligen Code eingeben.');
     if (this.net) this.net.close();
     const net = (this.net = new SC.Net());
-    this.status('Suche Raum ' + code + ' …');
+    this.status('Suche Code ' + code + ' …');
     net.onmsg = (m) => {
-      if (m && m.t === 'start') this.launchOnline(m.map);
+      if (m && m.t === 'start' && SC.MAPS.some((x) => x.id === m.map)) this.preP2P(net, m.map);
     };
     try {
       await net.join(
         code,
         () => this.status('Verbunden! Warte auf Start …'),
-        (e) => this.status(e.type === 'peer-unavailable' ? 'Raum nicht gefunden.' : 'Fehler: ' + (e.type || e))
+        (e) => this.status(e.type === 'peer-unavailable' ? 'Code nicht gefunden.' : 'Fehler: ' + SC.esc(e.type || e))
       );
     } catch (e) {
-      this.status(e.message);
+      this.status(SC.esc(e.message));
     }
   },
-  launchOnline(map) {
-    const net = this.net;
+  preP2P(net, map) {
     this.net = null;
-    this.stopBg();
-    SC.UI.start({ mode: 'online', map, net });
+    let oppName = 'Gegner';
+    const back = () => {
+      net.send({ t: 'bye' });
+      net.close();
+      this.go('online');
+    };
+    this.openPre({
+      mode: 'p2p', net, map, opp: { name: oppName },
+      onStart: (lo) => SC.UI.start({ mode: 'p2p', map, net, loadout: lo, name: this.playerName(), oppName }),
+      onBack: back,
+    });
+    const pre = this.pre;
+    net.onmsg = (m) => {
+      if (!m || typeof m !== 'object' || this.pre !== pre) return;
+      if (m.t === 'ready') {
+        oppName = typeof m.name === 'string' && m.name.trim() ? m.name.trim().slice(0, 16) : 'Gegner';
+        pre.opp = { name: oppName };
+        pre.oppReady = true;
+        SC.$('#pre-status').textContent = '';
+        this.preRender();
+        this.preMaybeStart();
+      } else if (m.t === 'bye') {
+        this.pre = null;
+        net.close();
+        this.go('online');
+        this.status('Dein Gegner hat die Vorrunde verlassen.');
+      }
+    };
+    net.onclose = () => {
+      if (this.pre !== pre) return;
+      this.pre = null;
+      this.go('online');
+      this.status('Verbindung getrennt.');
+    };
   },
 
   // ---------------- Lexikon ----------------
@@ -189,20 +445,22 @@ SC.Menu = {
     let h = '';
     for (const k of SC.TOWER_ORDER) {
       const d = SC.TOWERS[k];
-      h += '<div class="lex-tower"><img src="' + SC.towerIcon(k, 76, [2, 0]) + '" alt=""><div><h4>' + d.name + ' – ' + d.cost + '</h4><p>' + d.desc + '</p><div class="lex-paths">';
+      h += '<div class="lex-tower"><img src="' + SC.towerIcon(k, 76, [2, 0]) + '" alt=""><div><h4>' + d.name + ' – ' + d.cost + (SC.NEW_TOWERS[k] ? ' <span class="lo-new">NEU</span>' : '') + '</h4><p>' + d.desc + '</p><div class="lex-paths">';
       for (let p = 0; p < 2; p++) {
         h += '<div>' + d.paths[p].map((u, i) => '<b>Stufe ' + (i + 1) + ': ' + u.name + '</b> (' + u.cost + ') – ' + u.desc).join('<br>') + '</div>';
       }
       h += '</div></div></div>';
     }
-    h += '<h3>Blasen</h3><div class="lex-bloons">';
+    h += '<h3>Kräfte</h3><div class="lex-powers">';
+    for (const p of SC.POWERS) h += '<div>' + SC.ICON.power(p.id) + '<p><b>' + p.name + '</b> – ' + p.desc + '<br><small>Kosten ' + (p.cost || 'keine') + ' · Abklingzeit ' + p.cd + ' s · ab Runde ' + p.round + '</small></p></div>';
+    h += '</div><h3>Blasen</h3><div class="lex-bloons">';
     const IM = { blast: 'Explosion', cold: 'Kälte', sharp: 'Spitzes', sonic: 'Schall' };
     for (const t of SC.BLOON_ORDER) {
       const b = SC.BLOONS[t];
       const imm = b.immune ? '<br>immun: ' + b.immune.map((x) => IM[x]).join(', ') : '';
       h += '<div><img src="' + SC.bloonIcon(t, 48) + '" alt=""><br><b>' + b.name + '</b><br>RBE ' + b.rbe + imm + '</div>';
     }
-    h += '</div><p class="hint">Upgrade-Regel wie in BTD Battles: ein Pfad bis Stufe 4, der andere höchstens bis Stufe 2. Stufe 4 schaltet eine Spezialfähigkeit frei.</p>';
+    h += '</div><p class="hint">Ausrüstung wie in BTD Battles: 3 Türme frei wählen, der 4. kommt vom Würfel (2x neu würfeln). Upgrade-Regel: ein Pfad bis Stufe 4, der andere höchstens bis Stufe 2. Stufe 4 schaltet eine Spezialfähigkeit frei.</p>';
     SC.$('#lex-content').innerHTML = h;
   },
 

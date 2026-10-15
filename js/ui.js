@@ -10,7 +10,7 @@ SC.paintIcons = function (root) {
   for (const el of $$('i[data-icon]', root)) {
     if (el.dataset.done) continue;
     const fn = SC.ICON[el.dataset.icon];
-    if (fn) el.innerHTML = fn();
+    if (fn) el.innerHTML = fn(el.dataset.dir);
     el.dataset.done = 1;
   }
 };
@@ -38,7 +38,7 @@ SC.closeModal = () => $('#modal').classList.add('hidden');
 const STEP = 1 / 60;
 const TARGETS = ['first', 'last', 'strong', 'close'];
 const TARGET_NAME = { first: 'Erste', last: 'Letzte', strong: 'Stärkste', close: 'Nächste' };
-const TARGET_KINDS = ['knall', 'fang', 'einsiedler', 'kokos'];
+const TARGET_KINDS = ['knall', 'fang', 'einsiedler', 'kokos', 'post', 'molt', 'dice'];
 const fmt = (n) => SC.fmt(n);
 
 SC.UI = {
@@ -61,7 +61,7 @@ SC.UI = {
     });
     window.addEventListener('keydown', (e) => {
       if (!this.game) return;
-      if (e.key === 'Escape') this.cancelPlacing(), this.select(null);
+      if (e.key === 'Escape') this.cancelPlacing(), this.cancelPower(), this.select(null);
       if (e.key === ' ' && this.game.canStartRound()) this.game.startRound();
     });
     $('#wrap-opp').addEventListener('click', () => {
@@ -81,12 +81,14 @@ SC.UI = {
       const b = e.target.closest('.card');
       if (!b) return;
       SC.audio.init();
-      const s = SC.SENDS.find((x) => x.id === b.dataset.send);
       const g = this.game;
-      if (g.doSend(g.me, g.opp, s, Object.assign({}, this.mods))) {
+      if (g.act({ c: 'send', s: b.dataset.send, camo: !!this.mods.camo, regrow: !!this.mods.regrow })) {
         SC.audio.send();
         b.animate([{ transform: 'scale(0.86)' }, { transform: 'scale(1)' }], { duration: 140 });
-      } else SC.audio.error();
+      } else {
+        SC.audio.error();
+        if (g.queueLen(g.opp) >= SC.SEND_QUEUE_MAX) $('#pipe-out').animate([{ filter: 'brightness(1.8) saturate(2)' }, { filter: 'none' }], { duration: 400 });
+      }
     });
     for (const b of $$('.mods button')) {
       b.addEventListener('click', () => {
@@ -106,20 +108,20 @@ SC.UI = {
           SC.audio.click();
           break;
         case 'up':
-          if (f.upgrade(t, +b.dataset.p)) {
+          if (this.game.act({ c: 'up', id: t.id, p: +b.dataset.p })) {
             SC.audio.upgrade();
             this.upKey = '';
           } else SC.audio.error();
           break;
         case 'sell':
-          f.sell(t);
+          this.game.act({ c: 'sell', id: t.id });
           SC.audio.coin();
           this.select(null);
           break;
         case 'tprev':
         case 'tnext': {
           const i = TARGETS.indexOf(t.target);
-          t.target = TARGETS[(i + (b.dataset.a === 'tnext' ? 1 : TARGETS.length - 1)) % TARGETS.length];
+          this.game.act({ c: 'tgt', id: t.id, m: TARGETS[(i + (b.dataset.a === 'tnext' ? 1 : TARGETS.length - 1)) % TARGETS.length] });
           $('#tg').textContent = TARGET_NAME[t.target];
           SC.audio.click();
           break;
@@ -131,11 +133,36 @@ SC.UI = {
       if (!b) return;
       const g = this.abilityGroups().find((x) => x.key === b.dataset.g);
       const t = g && g.list.find((x) => this.game.me.canUseAbility(x));
-      if (t && this.game.me.useAbility(t)) {
+      if (t && this.game.act({ c: 'ab', id: t.id })) {
         b.animate([{ transform: 'scale(1.25)' }, { transform: 'scale(1)' }], { duration: 200 });
         this.banner(t.ab.def.name + '!');
         this.abKey = '';
       } else SC.audio.error();
+    });
+    $('#powers').addEventListener('click', (e) => {
+      const b = e.target.closest('.power');
+      if (!b || !this.game) return;
+      SC.audio.init();
+      const i = +b.dataset.i;
+      const g = this.game, f = g.me;
+      const st = f.powerState(i, g.round);
+      if (!st.ok) {
+        SC.audio.error();
+        if (st.def) this.toast(SC.ICON.power(st.def.id) + SC.esc(st.def.name) + ': ' + (st.why === 'round' ? 'ab Runde ' + st.def.round : st.why === 'cd' ? 'lädt noch' : 'zu teuer (' + st.def.cost + ')'));
+        return;
+      }
+      if (st.def.target === 'map') {
+        if (this.powerSel === i) return this.cancelPower();
+        this.cancelPlacing();
+        this.select(null);
+        this.powerSel = i;
+        b.classList.add('on');
+        const lbl = $('#view-label');
+        lbl.textContent = st.def.name + ' – tippe auf die Strecke';
+        lbl.classList.remove('hidden');
+        return;
+      }
+      this.firePower(i, undefined, undefined);
     });
     $('#btn-menu').addEventListener('click', () => this.pauseMenu());
     $('#btn-start').addEventListener('click', () => {
@@ -178,15 +205,21 @@ SC.UI = {
     for (const b of $$('.mods button')) b.classList.remove('on');
     $('#game').className = 'screen bricks ' + (g.battle ? 'battle' : 'classic');
     SC.showScreen('game');
-    $('#name-me').textContent = 'Du';
+    $('#name-me').textContent = g.me.name;
     if (g.opp) $('#name-opp').textContent = g.opp.name;
     $('#upgrade').classList.add('hidden');
     $('#abilities').innerHTML = '';
-    $('#queue').innerHTML = '';
+    for (const p of $$('.pipe')) {
+      p._key = '';
+      p.querySelector('.pipe-items').innerHTML = '';
+    }
     $('#toasts').innerHTML = '';
     $('#view-label').classList.add('hidden');
+    this.powerSel = null;
     this.buildShop();
     this.buildSends();
+    this.buildPowers();
+    if (g.mode === 'server') this.bindServer(g.net);
     SC.paintIcons($('#game'));
     SC.music.play('game');
     this.resize();
@@ -199,7 +232,7 @@ SC.UI = {
   },
   vsIntro() {
     const g = this.game;
-    g.paused = true;
+    if (g.mode !== 'server') g.paused = true;
     const vs = $('#vs');
     vs.classList.remove('hidden');
     vs.style.animation = 'none';
@@ -216,16 +249,17 @@ SC.UI = {
       if (side === 'r') x.scale(-1, 1);
       SC.drawHero(x, side === 'l' ? '#2f7fe8' : '#e8302a', 1);
     }
-    $('#vs-name-l').textContent = 'Du';
+    $('#vs-name-l').textContent = g.me.name;
     $('#vs-name-r').textContent = g.opp.name;
     SC.audio.vs();
     clearTimeout(this.vsT);
     this.vsT = setTimeout(() => {
       vs.classList.add('hidden');
-      if (this.game === g) g.paused = false;
+      if (this.game === g && g.mode !== 'server') g.paused = false;
     }, 2650);
   },
   quit() {
+    clearTimeout(this.reconT);
     if (this.game) this.game.destroy();
     this.game = null;
     this.running = false;
@@ -293,6 +327,12 @@ SC.UI = {
       this.viewOpp = false;
       return;
     }
+    if (this.powerSel != null) {
+      const i = this.powerSel;
+      this.cancelPower();
+      this.firePower(i, SC.clamp(p.x, 0, SC.W), SC.clamp(p.y, 0, SC.H));
+      return;
+    }
     if (this.placing) {
       this.dragging = true;
       this.updateGhost(p);
@@ -322,7 +362,11 @@ SC.UI = {
       const p = this.downP;
       this.downP = null;
       const f = this.game.me;
-      if (f.collectAt(p.x, p.y)) return;
+      const crate = f.crateAt(p.x, p.y);
+      if (crate) {
+        this.game.act({ c: 'crate', id: crate.id });
+        return;
+      }
       const t = f.towerAt(p.x, p.y);
       this.select(t);
       if (t) SC.audio.click();
@@ -343,7 +387,8 @@ SC.UI = {
       SC.audio.error();
       return;
     }
-    const t = f.placeTower(this.placing, g.x, g.y);
+    const ok = this.game.act({ c: 'place', k: this.placing, x: g.x, y: g.y });
+    const t = ok ? f.towers[f.towers.length - 1] : null;
     if (t) {
       SC.audio.place();
       this.cancelPlacing();
@@ -352,6 +397,7 @@ SC.UI = {
   },
   startPlacing(kind) {
     this.select(null);
+    this.cancelPower();
     this.placing = kind;
     this.ghost.show = false;
     for (const c of $$('#shop .card')) c.classList.toggle('on', c.dataset.kind === kind);
@@ -379,7 +425,75 @@ SC.UI = {
 
   // ---------------- Leisten ----------------
   buildShop() {
-    $('#shop').innerHTML = SC.TOWER_ORDER.map((k) => '<button class="card" data-kind="' + k + '" title="' + SC.TOWERS[k].name + '"><img src="' + SC.towerIcon(k, 44) + '" alt=""><span class="price">' + SC.TOWERS[k].cost + '</span></button>').join('');
+    const f = this.game.me;
+    const list = f.allowed || SC.TOWER_ORDER;
+    const dice = this.game.battle && this.game.cfg.loadout ? this.game.cfg.loadout.towers[3] : null;
+    $('#shop').innerHTML = list.map((k) => '<button class="card' + (k === dice ? ' dice' : '') + '" data-kind="' + k + '" title="' + SC.TOWERS[k].name + (k === dice ? ' (Würfel)' : '') + '"><img src="' + SC.towerIcon(k, 44) + '" alt="">' + (k === dice ? '<span class="dbadge">' + SC.ICON.dice(6) + '</span>' : '') + '<span class="price">' + SC.TOWERS[k].cost + '</span></button>').join('');
+  },
+  buildPowers() {
+    const f = this.game.me;
+    $('#powers').innerHTML = f.powers.map((p, i) => {
+      const d = SC.POWER_BY_ID[p.id];
+      const off = !this.game.battle && d.target === 'opp';
+      return '<button class="power' + (off ? ' off' : '') + '" data-i="' + i + '" title="' + SC.esc(d.name + ' – ' + d.desc) + '">' + SC.ICON.power(d.id) + '<span class="cd"></span><span class="pcost">' + (d.cost || 'gratis') + '</span><span class="plock">R' + d.round + '</span></button>';
+    }).join('');
+  },
+  firePower(i, x, y) {
+    const c = { c: 'pow', i };
+    if (x !== undefined) {
+      c.x = x;
+      c.y = y;
+    }
+    const def = SC.POWER_BY_ID[this.game.me.powers[i].id];
+    if (this.game.act(c)) {
+      this.banner(def.name + '!');
+      if (def.target === 'opp') this.toast(SC.ICON.power(def.id) + SC.esc(def.name) + ' trifft ' + SC.esc(this.game.opp.name) + '!');
+    } else SC.audio.error();
+  },
+  cancelPower() {
+    if (this.powerSel == null) return;
+    this.powerSel = null;
+    for (const b of $$('#powers .power')) b.classList.remove('on');
+    if (!this.placing) $('#view-label').classList.add('hidden');
+  },
+  refreshPowers() {
+    const g = this.game, f = g.me;
+    for (const b of $$('#powers .power')) {
+      const p = f.powers[+b.dataset.i];
+      if (!p) continue;
+      const d = SC.POWER_BY_ID[p.id];
+      const st = f.powerState(+b.dataset.i, g.round);
+      b.classList.toggle('ready', st.ok);
+      b.classList.toggle('locked', st.why === 'round');
+      b.classList.toggle('poor', st.why === 'money');
+      const pct = p.cd > 0 ? p.cd / d.cd : 0;
+      b.querySelector('.cd').style.background = pct > 0 ? 'conic-gradient(rgba(10,20,40,0.62) ' + pct * 100 + '%, transparent 0)' : 'none';
+    }
+  },
+  // Röhren zwischen den Feldern: was ich sende / was zu mir kommt, und wie voll sie sind
+  refreshPipes() {
+    const P = this.game.pipes();
+    const draw = (el, q) => {
+      if (!q) return;
+      const n = q.list.length;
+      const key = n + '|' + q.list.map((e) => e.t + e.n + (e.post ? 'p' : '')).join(',') + '|' + (q.cur ? q.cur.t + q.cur.n + Math.round(q.cur.p * 10) : '') + '|' + q.transit.length;
+      if (el._key === key) return;
+      el._key = key;
+      const pct = Math.min(1, n / SC.SEND_QUEUE_MAX);
+      const fill = el.querySelector('.pipe-fill');
+      fill.style.height = pct * 100 + '%';
+      fill.className = 'pipe-fill' + (pct >= 1 ? ' full' : pct >= 0.66 ? ' high' : pct >= 0.34 ? ' mid' : '');
+      el.querySelector('.pipe-cnt').textContent = n + '/' + SC.SEND_QUEUE_MAX;
+      const item = (e, cls, extra) =>
+        '<div class="pitem ' + cls + (e.post ? ' post' : '') + (e.camo ? ' camo' : '') + (e.regrow ? ' regrow' : '') + '"><img src="' + SC.bloonIcon(e.t, 22) + '" alt=""><b>' + e.n + '</b>' + (extra || '') + '</div>';
+      let h = '';
+      if (q.cur) h += item(q.cur, 'cur', '<span class="pprog"><i style="width:' + Math.round(q.cur.p * 100) + '%"></i></span>');
+      for (const e of q.list.slice(0, 8)) h += item(e, '');
+      for (const e of q.transit.slice(0, 3)) h += item(e, 'transit');
+      el.querySelector('.pipe-items').innerHTML = h;
+    };
+    draw($('#pipe-out'), P.out);
+    draw($('#pipe-in'), P.in);
   },
   buildSends() {
     $('#sends').innerHTML = SC.SENDS.map((s) => {
@@ -446,15 +560,10 @@ SC.UI = {
       }
       $('#mod-camo').disabled = r < SC.SEND_MOD.camo.round;
       $('#mod-regrow').disabled = r < SC.SEND_MOD.regrow.round;
-      // eingehende Sends (gegen mich)
-      const q = f.sendQueue;
-      const qk = q.map((x) => x.send.id).join(',');
-      if (qk !== this.qKey) {
-        this.qKey = qk;
-        $('#queue').innerHTML = q.slice(0, 6).map((x) => '<div class="qcard"><img src="' + SC.bloonIcon(x.send.type, 24) + '"><b>' + x.send.count + '</b></div>').join('');
-      }
+      this.refreshPipes();
     } else $('#btn-start').disabled = !g.canStartRound();
     this.refreshAbilities();
+    this.refreshPowers();
   },
   // Gleiche Fähigkeiten werden wie in BTD zu einem Button gebündelt
   abilityGroups() {
@@ -548,14 +657,27 @@ SC.UI = {
       SC.audio.round();
     } else if (kind === 'ability') {
       if (d.field === g.me) this.cutin(d.t);
-      else this.toast('<img src="' + SC.towerIcon(d.t.kind, 22, d.t.tiers) + '">' + g.opp.name + ': ' + d.t.ab.def.name + '!');
+      else this.toast('<img src="' + SC.towerIcon(d.t.kind, 22, d.t.tiers) + '">' + SC.esc(g.opp.name) + ': ' + SC.esc(d.t.ab.def.name) + '!');
     } else if (kind === 'tier4') {
       if (g.me.towers.includes(d)) this.banner('MEISTER-UPGRADE!');
     } else if (kind === 'rush') {
       setTimeout(() => this.banner('Die Strömung wird stärker!'), 1700);
     } else if (kind === 'incoming') {
-      const mods = (d.mods.camo ? ' Glas' : '') + (d.mods.regrow ? ' Nachwachs' : '');
-      this.toast('<img src="' + SC.bloonIcon(d.send.type, 22) + '">' + d.send.count + 'x ' + SC.BLOONS[d.send.type].name + mods);
+      const mods = d.mods ? (d.mods.camo ? ' Glas' : '') + (d.mods.regrow ? ' Nachwachs' : '') : '';
+      if (d.k === 'send') {
+        const s = SC.sendById(d.id);
+        this.toast('<img src="' + SC.bloonIcon(s.type, 22) + '">' + s.count + 'x ' + SC.BLOONS[s.type].name + mods);
+      } else if (d.k === 'post') this.toast('<img src="' + SC.bloonIcon(d.types[0], 22) + '">Flaschenpost! ' + d.types.length + ' Blasen' + mods);
+      else if (d.k === 'hex') {
+        const def = SC.POWER_BY_ID[d.id];
+        this.toast(SC.ICON.power(d.id) + SC.esc(def.name) + '!');
+        this.banner(def.name + '!');
+      }
+    } else if (kind === 'power') {
+      if (d.field !== g.me) this.toast(SC.ICON.power(d.def.id) + SC.esc(g.opp.name) + ': ' + SC.esc(d.def.name));
+    } else if (kind === 'towers') {
+      this.upKey = '';
+      if (this.sel && !g.me.towers.includes(this.sel)) this.select(g.me.towerById(this.sel.id) || null);
     } else if (kind === 'won40') {
       SC.audio.win();
       g.paused = true;
@@ -575,8 +697,9 @@ SC.UI = {
     if (res.win) this.confetti();
     let title, txt;
     if (g.battle) {
-      title = res.win ? 'SIEG!' : 'NIEDERLAGE';
-      txt = res.reason || (res.win ? 'Deine Krebse haben die Schlacht gewonnen!' : 'Zu viele Blasen sind durchgekommen.');
+      title = res.draw ? 'UNENTSCHIEDEN' : res.win ? 'SIEG!' : 'NIEDERLAGE';
+      txt = SC.esc(res.reason || (res.win ? 'Deine Krebse haben die Schlacht gewonnen!' : 'Zu viele Blasen sind durchgekommen.'));
+      if (res.delta) txt += '<br><b class="delta ' + (res.delta > 0 ? 'up' : 'down') + '">Wertung ' + (res.delta > 0 ? '+' : '') + res.delta + (res.rating != null ? ' → ' + res.rating : '') + '</b>';
     } else {
       title = 'GAME OVER';
       txt = 'Rekord auf dieser Karte: Runde ' + SC.store.get('best.' + g.map.id, 0);
@@ -585,8 +708,8 @@ SC.UI = {
     SC.modal(
       '<h2 class="' + (res.win ? '' : 'lose') + '">' + title + '</h2><p>' + txt + '</p>' +
         '<div class="stats"><div>Runde<b>' + g.round + '</b></div><div>Popps<b>' + fmt(st.pops) + '</b></div>' + (g.battle ? '<div>Gesendet<b>' + st.sent + '</b></div>' : '') + '<div>Zeit<b>' + $('#clock').textContent + '</b></div></div>' +
-        '<div class="btns">' + (g.mode !== 'online' ? '<button class="btn green" data-act="again">' + ico('play') + 'Nochmal</button>' : '') + '<button class="btn blue" data-act="menu">Menü</button></div>',
-      { again: () => this.start(this.cfg), menu: () => this.quit() }
+        '<div class="btns">' + (g.mode === 'ai' || g.mode === 'classic' ? '<button class="btn green" data-act="again">' + ico('play') + 'Nochmal</button>' : '') + '<button class="btn blue" data-act="menu">Menü</button></div>',
+      { again: () => (g.mode === 'ai' ? SC.Menu.again(this.cfg) : this.start(this.cfg)), menu: () => this.quit() }
     );
   },
   cutin(t) {
@@ -637,7 +760,7 @@ SC.UI = {
   pauseMenu() {
     const g = this.game;
     SC.audio.click();
-    const canPause = g.mode !== 'online';
+    const canPause = g.mode === 'ai' || g.mode === 'classic';
     if (canPause) g.paused = true;
     SC.modal(
       '<h2>' + (canPause ? 'Pause' : 'Menü') + '</h2>' + (canPause ? '' : '<p>Online läuft das Spiel weiter!</p>') +
@@ -662,13 +785,66 @@ SC.UI = {
           return false;
         },
         quit: () => {
-          if (g.mode === 'online' && g.net) g.net.send({ t: 'bye' });
+          if (g.mode === 'p2p' && g.net) g.net.send({ t: 'bye' });
+          if (g.mode === 'server' && g.net) g.net.send({ t: 'quit' });
           this.quit();
         },
       }
     );
     const sb = $('#modal-box [data-act="sound"] i');
     if (sb) sb.innerHTML = SC.ICON.sound(SC.audio.on);
+  },
+
+  // ---------------- Online über den eigenen Server ----------------
+  bindServer(net) {
+    const g = this.game;
+    net.on('st', (m) => g.reconcile(m));
+    net.on('s', (m) => g.opp.apply(m));
+    net.on('inc', (m) => m.atk && g.incoming(m.atk, m.at));
+    net.on('rs', (m) => g.applyResync(m));
+    net.on('rej', () => {});
+    net.on('start', (m) => {
+      net.startAt = m.startAt;
+      if (!net.samples.length) net.offset = m.now - Date.now();
+    });
+    net.on('ev', (m) => {
+      if (m.k === 'ab') this.toast('<img src="' + SC.towerIcon(SC.TOWERS[m.kind] ? m.kind : 'knall', 22, m.tiers) + '">' + SC.esc(g.opp.name) + ': ' + SC.esc(m.name) + '!');
+      else if (m.k === 'pow' && SC.POWER_BY_ID[m.id]) this.toast(SC.ICON.power(m.id) + SC.esc(g.opp.name) + ': ' + SC.esc(SC.POWER_BY_ID[m.id].name));
+      else if (m.k === 'gone') this.toast('Gegner hat die Verbindung verloren …');
+      else if (m.k === 'back') this.toast('Gegner ist wieder da.');
+    });
+    net.on('end', (m) => {
+      const why =
+        m.reason === 'surrender' ? (m.win ? 'Dein Gegner hat aufgegeben.' : 'Du hast aufgegeben.')
+        : m.reason === 'disconnect' ? (m.win ? 'Dein Gegner ist nicht zurückgekommen.' : 'Du warst zu lange weg.')
+        : m.reason === 'timeout' ? 'Zeitlimit erreicht – mehr Leben gewinnt.' : null;
+      g.end(!!m.win, why, { draw: !!m.draw, delta: m.delta | 0, rating: m.rating });
+      net.close();
+    });
+    net.on('abort', () => g.end(false, 'Die Partie wurde vom Server abgebrochen.'));
+    net.on('err', (m) => m.msg && this.toast(SC.esc(m.msg)));
+    net.on('close', () => {
+      if (this.game === g && !g.over) this.reconnect(g);
+    });
+  },
+  // Verbindung weg? Neu verbinden und mit dem Token der Partie wieder einsteigen
+  async reconnect(g, tries = 0) {
+    if (this.game !== g || g.over) return;
+    if (tries === 0) this.toast('Verbindung verloren – verbinde neu …');
+    if (tries > 12) return g.end(false, 'Keine Verbindung zum Server.');
+    const net = new SC.ServerNet();
+    try {
+      await net.connect();
+    } catch (e) {
+      this.reconT = setTimeout(() => this.reconnect(g, tries + 1), 1500 + tries * 500);
+      return;
+    }
+    if (this.game !== g || g.over) return net.close();
+    net.startAt = g.net.startAt;
+    net.offset = g.net.offset;
+    g.net = net;
+    this.bindServer(net);
+    net.send({ t: 'hello', ver: SC.VERSION, rejoin: g.cfg.token });
   },
 
   // ---------------- Loop ----------------
@@ -681,14 +857,28 @@ SC.UI = {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     const g = this.game;
-    this.acc += dt * (g.battle ? 1 : this.speed);
-    let n = 0;
-    while (this.acc >= STEP && n < 12) {
-      g.update(STEP);
-      this.acc -= STEP;
-      n++;
+    if (g.mode === 'server') {
+      // Feste Zeitachse: Tick = (Server-Uhr – Start) / Schrittweite. Hängt das Gerät, holen wir auf.
+      const target = g.net.targetTick();
+      let n = 0;
+      while (g.tick < target && n < 300 && !g.over) {
+        g.update(STEP);
+        n++;
+      }
+      if (target - g.tick > 900 && now - (this.rsAsk || 0) > 3000) {
+        this.rsAsk = now;
+        g.net.send({ t: 'resync' });
+      }
+    } else {
+      this.acc += dt * (g.battle ? 1 : this.speed);
+      let n = 0;
+      while (this.acc >= STEP && n < 12) {
+        g.update(STEP);
+        this.acc -= STEP;
+        n++;
+      }
+      if (n >= 12) this.acc = 0;
     }
-    if (n >= 12) this.acc = 0;
     this.render();
     this.updateHud();
     this.panelT = (this.panelT || 0) - dt;
@@ -711,6 +901,13 @@ SC.UI = {
     } else {
       if (!this.placing && !lbl.classList.contains('hidden')) lbl.classList.add('hidden');
       SC.renderField(ctx, g.me, time, this.bg, { selected: this.sel });
+      if (this.powerSel != null) {
+        ctx.save();
+        ctx.globalAlpha = 0.18 + Math.sin(time * 8) * 0.06;
+        ctx.fillStyle = '#ffe14d';
+        ctx.fillRect(0, 0, SC.W, SC.H);
+        ctx.restore();
+      }
       if (this.placing && this.ghost.show) {
         const gh = this.ghost, def = SC.TOWERS[this.placing];
         const r = def.base.global ? 30 : def.base.range || SC.towerRadius(this.placing) + 4;

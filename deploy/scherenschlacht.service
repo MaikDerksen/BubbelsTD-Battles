@@ -1,0 +1,35 @@
+# systemd-Dienst für den Betrieb ohne Docker (Linux).
+#   sudo useradd --system --home /opt/scherenschlacht --shell /usr/sbin/nologin scherenschlacht
+#   sudo cp -r . /opt/scherenschlacht && cd /opt/scherenschlacht/server && sudo npm ci --omit=dev
+#   sudo mkdir -p /etc/scherenschlacht /var/lib/scherenschlacht && sudo chown scherenschlacht /var/lib/scherenschlacht
+#   sudo cp server/.env.example /etc/scherenschlacht/env   (anpassen!)
+#   sudo cp deploy/scherenschlacht.service /etc/systemd/system/ && sudo systemctl enable --now scherenschlacht
+[Unit]
+Description=Scherenschlacht Spiel-Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=scherenschlacht
+WorkingDirectory=/opt/scherenschlacht
+EnvironmentFile=/etc/scherenschlacht/env
+ExecStart=/usr/bin/node server/server.js
+Restart=on-failure
+RestartSec=3
+
+# Härtung
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/scherenschlacht
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
