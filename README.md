@@ -3,6 +3,8 @@
 Ein 1-gegen-1-Tower-Defense im Look von *Bloons TD Battles*, in dem Krebse gegen Blasen kämpfen.
 Das komplette Design steht in [MASTER_PROMPT.md](MASTER_PROMPT.md).
 
+**Spielen:** https://maikderksen.github.io/BubbelsTD-Battles/
+
 - **10 Krebs-Türme** mit je 2 Upgrade-Pfaden à 4 Stufen (wie BTD Battles: ein Pfad bis 4, der andere bis 2): Knallkrebs, Fangschreckenkrebs, Einsiedlerkrebs, Riesenspinnenkrabbe, Kokoskrabbe, Yeti-Krabbe, Seepocken-Kolonie, Krillschwarm, Winkerkrabbe (Support) und Garnelenfarm (Wirtschaft). Jede Stufe sieht man am Krebs.
 - **20 Spezialfähigkeiten:** Stufe 4 schaltet pro Pfad eine aktivierbare Fähigkeit frei (Schallmauer, Kokos-Meteor, Absoluter Nullpunkt, Walgesang …). Die Buttons erscheinen unten links auf dem Spielfeld.
 - **14 Blasentypen**, von Rot bis Krakenkönig, dazu Glas (Camo) und Nachwachs (Regrow).
