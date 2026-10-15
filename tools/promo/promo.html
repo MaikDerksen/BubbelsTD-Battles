@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scherenschlacht – Promo-Video</title>
+    <link href="https://fonts.googleapis.com/css2?family=Luckiest+Guy&family=Nunito:wght@800;900&display=swap" rel="stylesheet" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #111;
+        color: #fff;
+        font-family: Nunito, sans-serif;
+        font-weight: 900;
+        overflow: hidden;
+      }
+      #wrap {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+      }
+      #cv {
+        height: 96vh;
+        aspect-ratio: 9 / 16;
+        box-shadow: 0 0 0 2px #333;
+      }
+      #ui {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-width: 260px;
+      }
+      button {
+        font: 400 20px 'Luckiest Guy', sans-serif;
+        padding: 10px 16px;
+        border-radius: 12px;
+        border: 3px solid #1b1208;
+        background: linear-gradient(#b7f26a, #55c425);
+        color: #fff;
+        text-shadow: 0 2px 0 #1b1208;
+        cursor: pointer;
+      }
+      #status {
+        font-size: 14px;
+        line-height: 1.4;
+      }
+      a {
+        color: #9fe0ff;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <canvas id="cv" width="1080" height="1920"></canvas>
+      <div id="ui">
+        <button id="btn-preview">Vorschau</button>
+        <button id="btn-rec">Aufnehmen (MP4)</button>
+        <div id="status">Bereit.</div>
+      </div>
+    </div>
+    <script src="../../js/util.js"></script>
+    <script src="../../js/data.js"></script>
+    <script src="../../js/draw.js"></script>
+    <script src="../../js/towers.js"></script>
+    <script src="../../js/hero.js"></script>
+    <script src="../../js/maps.js"></script>
+    <script src="../../js/render.js"></script>
+    <script src="../../js/audio.js"></script>
+    <script src="../../js/field.js"></script>
+    <script src="../../js/ai.js"></script>
+    <script src="../../js/game.js"></script>
+    <script src="promo.js"></script>
+  </body>
+</html>

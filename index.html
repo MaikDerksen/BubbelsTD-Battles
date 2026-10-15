@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Scherenschlacht" />
+    <meta name="theme-color" content="#1a3f8f" />
+    <meta name="description" content="Krebs-Tower-Defense-Battles: 1 gegen 1, gegen die KI oder in klassischen Wellen." />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/icon-180.png" />
+    <link rel="icon" type="image/png" href="icons/icon-192.png" />
+    <title>Scherenschlacht</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Luckiest+Guy&family=Nunito:wght@800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- ================= TITELBILD ================= -->
+      <section id="title" class="screen active">
+        <canvas id="title-bg"></canvas>
+        <canvas id="hero-l" class="hero l"></canvas>
+        <canvas id="hero-r" class="hero r"></canvas>
+        <div class="title-center">
+          <div class="logo">
+            <div class="l1" data-t="SCHEREN">SCHEREN</div>
+            <div class="l2" data-t="SCHLACHT">SCHLACHT</div>
+            <div class="ribbon"><span>Krusten-Battles</span></div>
+          </div>
+          <canvas id="trophy"></canvas>
+          <div class="title-menu">
+            <button class="btn green big" data-go="setup-ai"><i data-icon="swords"></i>Duell gegen KI</button>
+            <button class="btn blue big" data-go="online"><i data-icon="globe"></i>Online-Duell</button>
+            <button class="btn orange big" data-go="setup-classic"><i data-icon="wave"></i>Klassik-Wellen</button>
+          </div>
+        </div>
+        <div class="corner">
+          <button class="rbtn" data-go="lexikon" aria-label="Krebs-Lexikon"><i data-icon="book"></i></button>
+          <button class="rbtn" id="btn-music" aria-label="Musik"></button>
+          <button class="rbtn" id="btn-sound" aria-label="Ton"></button>
+        </div>
+        <div id="install-hint" class="hidden">Tipp: In Safari „Teilen“ → „Zum Home-Bildschirm“ für Vollbild &amp; offline</div>
+      </section>
+
+      <!-- ================= SETUP ================= -->
+      <section id="setup" class="screen bricks">
+        <div class="board">
+          <div class="board-head">
+            <button class="rbtn small" data-go="title" aria-label="Zurück"><i data-icon="back"></i></button>
+            <h2 id="setup-title">Duell gegen KI</h2>
+          </div>
+          <div class="board-body">
+            <h3>Karte wählen</h3>
+            <div id="map-list" class="map-list"></div>
+            <h3 id="diff-title">Gegner</h3>
+            <div id="diff-list" class="diff-list"></div>
+          </div>
+          <button class="btn green big go" id="btn-play"><i data-icon="play"></i>Los geht's!</button>
+        </div>
+      </section>
+
+      <!-- ================= ONLINE ================= -->
+      <section id="online" class="screen bricks">
+        <div class="board">
+          <div class="board-head">
+            <button class="rbtn small" data-go="title" aria-label="Zurück"><i data-icon="back"></i></button>
+            <h2>Online-Duell</h2>
+          </div>
+          <div class="board-body">
+            <p class="hint">Ein Spieler erstellt einen Raum, der andere gibt den 4-stelligen Code ein. Beide brauchen Internet.</p>
+            <h3>Karte (wählt der Gastgeber)</h3>
+            <div id="map-list-online" class="map-list"></div>
+            <div class="online-row">
+              <button class="btn green big" id="btn-host">Raum erstellen</button>
+              <div class="join">
+                <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" />
+                <button class="btn blue big" id="btn-join">Beitreten</button>
+              </div>
+            </div>
+            <div id="online-status" class="status"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= LEXIKON ================= -->
+      <section id="lexikon" class="screen bricks">
+        <div class="board wide">
+          <div class="board-head">
+            <button class="rbtn small" data-go="title" aria-label="Zurück"><i data-icon="back"></i></button>
+            <h2>Krebs-Lexikon</h2>
+          </div>
+          <div class="board-body" id="lex-content"></div>
+        </div>
+      </section>
+
+      <!-- ================= SPIEL ================= -->
+      <section id="game" class="screen bricks">
+        <div id="topbar">
+          <div class="hp me"><div class="hp-fill" id="hpf-me"></div><div class="hp-txt"><b id="hp-me">150</b><span id="name-me">Du</span></div></div>
+          <div id="round-dome"><small>Runde</small><b id="round-n">0</b></div>
+          <div class="hp opp battle-only"><div class="hp-fill" id="hpf-opp"></div><div class="hp-txt"><span id="name-opp">KI</span><b id="hp-opp">150</b></div></div>
+          <button class="rbtn tiny" id="btn-menu" aria-label="Menü"><i data-icon="gear"></i></button>
+        </div>
+        <div id="arena">
+          <div id="wrap-me" class="field-wrap">
+            <canvas id="cv"></canvas>
+            <div id="abilities"></div>
+            <div id="banner"></div>
+            <div id="toasts"></div>
+            <div id="view-label" class="hidden">Feld des Gegners – tippen zum Zurückkehren</div>
+          </div>
+          <div id="divider" class="battle-only"><div id="queue"></div></div>
+          <div id="wrap-opp" class="field-wrap battle-only"><canvas id="cv-opp"></canvas><div class="peek"><i data-icon="eye"></i></div></div>
+        </div>
+        <div id="bottombar">
+          <div class="scroller" id="shop-wrap"><div id="shop" class="cards"></div></div>
+          <div id="dome">
+            <div class="drow"><i data-icon="hourglass"></i><b id="clock">00:00</b></div>
+            <div class="drow"><i data-icon="coin"></i><b id="money">650</b></div>
+            <div class="drow battle-only"><i data-icon="eco"></i><b id="eco" class="eco">250</b><span class="ecobar"><span id="ecobar"></span></span></div>
+            <div class="drow classic-only"><i data-icon="heart"></i><b id="lives-c">150</b></div>
+          </div>
+          <div class="scroller battle-only" id="send-wrap">
+            <div class="mods">
+              <button data-mod="camo" id="mod-camo"><i data-icon="eye"></i>Glas</button>
+              <button data-mod="regrow" id="mod-regrow"><i data-icon="leaf"></i>Nachwachs</button>
+            </div>
+            <div id="sends" class="cards"></div>
+          </div>
+          <div id="playctl" class="classic-only">
+            <button class="rbtn" id="btn-auto" aria-label="Automatisch"><b>AUTO</b></button>
+            <button class="rbtn" id="btn-speed" aria-label="Tempo"><i data-icon="ffwd"></i></button>
+            <button class="rbtn big go" id="btn-start" aria-label="Runde starten"><i data-icon="play"></i></button>
+          </div>
+        </div>
+        <div id="upgrade" class="hidden"></div>
+      </section>
+
+      <!-- ================= VS-SCREEN ================= -->
+      <div id="vs" class="hidden">
+        <div class="vs-side l"><canvas id="vs-l"></canvas><div class="vs-name" id="vs-name-l">Du</div></div>
+        <div class="vs-side r"><canvas id="vs-r"></canvas><div class="vs-name" id="vs-name-r">KI</div></div>
+        <div class="vs-text">VS</div>
+      </div>
+
+      <!-- ================= FÄHIGKEITS-EINBLENDUNG ================= -->
+      <div id="cutin" class="hidden">
+        <div class="cutin-band">
+          <img id="cutin-img" alt="" />
+          <div class="cutin-txt"><small>Spezialfähigkeit</small><b id="cutin-name"></b></div>
+        </div>
+      </div>
+      <canvas id="confetti" class="hidden"></canvas>
+
+      <div id="modal" class="hidden"><div class="modal-box" id="modal-box"></div></div>
+    </div>
+
+    <script src="js/util.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/draw.js"></script>
+    <script src="js/towers.js"></script>
+    <script src="js/hero.js"></script>
+    <script src="js/maps.js"></script>
+    <script src="js/render.js"></script>
+    <script src="js/icons.js"></script>
+    <script src="js/audio.js"></script>
+    <script src="js/field.js"></script>
+    <script src="js/ai.js"></script>
+    <script src="js/net.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/main.js"></script>
+  </body>
+</html>
