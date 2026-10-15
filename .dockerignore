@@ -1,0 +1,12 @@
+.git
+.claude
+**/node_modules
+server/data
+server/test
+tools
+promo
+deploy
+*.db
+*.db-wal
+*.db-shm
+.env

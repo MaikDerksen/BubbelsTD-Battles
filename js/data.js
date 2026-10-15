@@ -225,6 +225,84 @@ SC.TOWERS = {
   },
 };
 // ============================================================
+//  NEUE TÜRME – Mechaniken, die es in Bloons nicht gibt
+// ============================================================
+Object.assign(SC.TOWERS, {
+  post: {
+    name: 'Flaschenpost-Krabbe',
+    cost: 550,
+    desc: 'Fängt Blasen mit dem Netz und schickt sie per Flaschenpost aufs Feld des Gegners. Im Klassik-Modus gibt es Muscheln dafür.',
+    base: { range: 100, rate: 1.6, catchN: 1, catchMax: 4, cap: 12 },
+    paths: [
+      [
+        { name: 'Großes Netz', cost: 250, desc: 'Fängt 35 % schneller.', apply: (s) => (s.rate *= 0.65) },
+        { name: 'Schleppnetz', cost: 700, desc: 'Fängt 2 Blasen auf einmal, auch Tinte, Eis und Panzer.', apply: (s) => { s.catchN = 2; s.catchMax = 7; } },
+        { name: 'Tiefsee-Reuse', cost: 2600, desc: '3 Blasen pro Fang bis Regenbogen, sieht Glas, größere Flaschen.', apply: (s) => { s.catchN = 3; s.catchMax = 9; s.camo = true; s.cap = 16; s.range += 20; } },
+      ],
+      [
+        { name: 'Eilpost', cost: 300, desc: 'Kleinere Flaschen: verschickt schon nach 8 Blasen.', apply: (s) => (s.cap = Math.min(s.cap, 8)) },
+        { name: 'Nachwachs-Tinte', cost: 800, desc: 'Verschickte Blasen kommen beim Gegner als Nachwachs an.', apply: (s) => (s.sendRegrow = true) },
+        { name: 'Glasflaschen', cost: 2200, desc: 'Verschickte Blasen kommen als Glas (Tarnung) an.', apply: (s) => (s.sendCamo = true) },
+      ],
+    ],
+  },
+  tide: {
+    name: 'Gezeiten-Hummer',
+    cost: 650,
+    desc: 'Bläst ins Muschelhorn und schiebt Blasen mit einer Gegenströmung zurück. Jede Blase lässt sich nur ein paar Mal zurückschieben.',
+    base: { range: 110, rate: 3.0, push: 42, moabPush: 0, maxPush: 3, dmg: 0, rotFree: true },
+    paths: [
+      [
+        { name: 'Springflut', cost: 300, desc: 'Schiebt 70 statt 42 Pixel zurück.', apply: (s) => (s.push = 70) },
+        { name: 'Strudel', cost: 900, desc: 'Die Welle macht 1 Schaden (stumpf) und schiebt auch Riesenblasen.', apply: (s) => { s.dmg = 1; s.moabPush = 22; } },
+        { name: 'Mahlstrom', cost: 3200, desc: 'Viel häufiger, 2 Schaden, jede Blase bis zu 5-mal zurück.', apply: (s) => { s.rate *= 0.55; s.dmg = 2; s.maxPush = 5; s.moabPush = 40; } },
+      ],
+      [
+        { name: 'Ebbe', cost: 250, desc: 'Blasen in Reichweite sind 20 % langsamer.', apply: (s) => (s.ebb = 0.8) },
+        { name: 'Gegenströmung', cost: 650, desc: '+30 Reichweite, erfasst auch Glas-Blasen.', apply: (s) => { s.range += 30; s.camo = true; } },
+        { name: 'Salzwasser', cost: 2500, desc: 'Zurückgeschobene Blasen nehmen 4 s lang +1 Schaden von allem.', apply: (s) => (s.soak = 4) },
+      ],
+    ],
+  },
+  molt: {
+    name: 'Häutungs-Hummer',
+    cost: 480,
+    desc: 'Sammelt Erfahrung mit jedem Treffer und häutet sich bis Level 10: jedes Level macht ihn schneller, stärker und größer. Ab Level 5 sieht er Glas.',
+    base: { range: 72, rate: 0.9, dmg: 1, pierce: 3, type: 'punch', xpMul: 1 },
+    paths: [
+      [
+        { name: 'Proteinkost', cost: 250, desc: '+50 % Erfahrung.', apply: (s) => (s.xpMul = 1.5) },
+        { name: 'Schnelle Häutung', cost: 700, desc: '+150 % Erfahrung und 15 % schneller.', apply: (s) => { s.xpMul = 2.5; s.rate *= 0.85; } },
+        { name: 'Riesenhummer', cost: 2800, desc: '+2 Schaden, +15 Reichweite, ×2 gegen Riesenblasen.', apply: (s) => { s.dmg += 2; s.range += 15; s.moabMul = 2; } },
+      ],
+      [
+        { name: 'Harte Schale', cost: 300, desc: '+3 Pierce pro Schlag.', apply: (s) => (s.pierce += 3) },
+        { name: 'Alte Schalen', cost: 650, desc: 'Lässt alle 15 s und bei jeder Häutung seine alte Schale als Falle auf der Strecke liegen.', apply: (s) => (s.shells = true) },
+        { name: 'Lehrmeister', cost: 2400, desc: 'Türme in Reichweite feuern pro Level 2 % schneller (max. 20 %).', apply: (s) => { s.teach = true; s.range += 10; } },
+      ],
+    ],
+  },
+  dice: {
+    name: 'Würfelkrabbe',
+    cost: 380,
+    desc: 'Wirft Würfel: eine 1 ist eine Niete, eine 6 ist ein kritischer Treffer mit vierfachem Schaden. Stumpf, knackt Panzer.',
+    base: { range: 135, rate: 0.75, dmg: 1, pierce: 2, type: 'punch', speed: 470, count: 1, critMul: 4 },
+    paths: [
+      [
+        { name: 'Gezinkte Würfel', cost: 220, desc: 'Würfelt zweimal und nimmt den besseren Wurf.', apply: (s) => (s.adv = true) },
+        { name: 'Doppelwurf', cost: 600, desc: 'Wirft 2 Würfel auf einmal.', apply: (s) => (s.count = 2) },
+        { name: 'Glückssträhne', cost: 2400, desc: 'Jede 6 explodiert und wirft sofort einen Bonuswürfel.', apply: (s) => { s.chain = true; s.critBoom = { r: 50, pierce: 14 }; s.dmg += 1; } },
+      ],
+      [
+        { name: 'Spielbank', cost: 300, desc: 'Jede gewürfelte 6 bringt 6 Muscheln.', apply: (s) => (s.chips = 6) },
+        { name: 'Würfelbecher', cost: 700, desc: 'Keine Nieten mehr (eine 1 wird neu gewürfelt) und sieht Glas.', apply: (s) => { s.noOne = true; s.camo = true; } },
+        { name: 'Jackpot', cost: 2600, desc: 'Jeder 40. Wurf ist ein Jackpot: +150 Muscheln und ein Riesenwürfel.', apply: (s) => { s.jackpot = 40; s.pierce += 2; } },
+      ],
+    ],
+  },
+});
+
+// ============================================================
 //  STUFE 4: Meister-Upgrades mit aktivierbarer Spezialfähigkeit
 //  Regel (wie BTD Battles): ein Pfad bis 4, der andere bis 2.
 // ============================================================
@@ -269,12 +347,29 @@ SC.TIER4 = {
     { name: 'Garnelen-Konzern', cost: 10000, desc: 'Passiv: +500 pro Tick. FÄHIGKEIT: Großernte – sofort 2000.', apply: (s) => (s.income += 500), ability: { id: 'cash', name: 'Großernte', cd: 60, amount: 2000 } },
     { name: 'Perlen-Zentralbank', cost: 9000, desc: 'Passiv: Zins-Obergrenze 2000. FÄHIGKEIT: Auszahlung von 25 % deines Guthabens (max. 4000).', apply: (s) => (s.bankCap = 2000), ability: { id: 'bank', name: 'Auszahlung', cd: 60, pct: 0.25, max: 4000 } },
   ],
+  post: [
+    { name: 'Kraken-Käfig', cost: 11000, desc: 'Passiv: fängt auch Korallen, 4 auf einmal. FÄHIGKEIT: Fängt die stärkste Riesenblase (bis Blauwal) auf deinem Feld und schickt sie dem Gegner.', apply: (s) => { s.catchMax = 10; s.catchN = 4; s.rate *= 0.8; }, ability: { id: 'cage', name: 'Kraken-Käfig', cd: 55 } },
+    { name: 'Postkönig', cost: 9500, desc: 'Passiv: verschickt schon nach 6 Blasen. FÄHIGKEIT: Paketbombe – schickt dem Gegner gratis einen Kugelfisch.', apply: (s) => { s.cap = 6; s.rate *= 0.85; }, ability: { id: 'mail', name: 'Paketbombe', cd: 45 } },
+  ],
+  tide: [
+    { name: 'Sturmflut', cost: 12000, desc: 'Passiv: schiebt 100 Pixel. FÄHIGKEIT: Eine Sturmflut schiebt alle Blasen der Karte weit zurück und betäubt sie.', apply: (s) => { s.push = 100; s.moabPush = 60; }, ability: { id: 'surge', name: 'Sturmflut', cd: 50, push: 260, moabPush: 120 } },
+    { name: 'Mondgezeiten', cost: 10000, desc: 'Passiv: Ebbe 35 %. FÄHIGKEIT: Springflut – alle Blasen 5 s lang im Strudel gefangen (stark verlangsamt, 2 Schaden alle 0,5 s).', apply: (s) => { s.ebb = 0.65; s.range += 20; }, ability: { id: 'moon', name: 'Springflut', cd: 50, dur: 5 } },
+  ],
+  molt: [
+    { name: 'Uralter Hummer', cost: 11000, desc: 'Passiv: mindestens Level 6, +3 Schaden. FÄHIGKEIT: Panzerschlag – 60 Schaden an allem im großen Umkreis (×3 gegen Riesen).', apply: (s) => { s.dmg += 3; s.minLvl = 6; }, ability: { id: 'ancient', name: 'Panzerschlag', cd: 35, r: 190, dmg: 60 } },
+    { name: 'Ewiger Hummer', cost: 9000, desc: 'Passiv: Lehrmeister-Bonus doppelt. FÄHIGKEIT: Große Häutung – sofort +2 Level und 8 s dreifaches Tempo.', apply: (s) => { s.teach2 = true; s.dmg += 1; }, ability: { id: 'bigmolt', name: 'Große Häutung', cd: 60, mul: 3, dur: 8 } },
+  ],
+  dice: [
+    { name: 'Sechser-Pasch', cost: 10500, desc: 'Passiv: kritische Treffer ×6. FÄHIGKEIT: 8 s lang ist jeder Wurf eine 6 – und doppelt so schnell.', apply: (s) => { s.critMul = 6; s.dmg += 1; }, ability: { id: 'lucky', name: 'Sechser-Pasch', cd: 40, dur: 8 } },
+    { name: 'Glücksgott', cost: 9500, desc: 'Passiv: schon eine 5 ist kritisch. FÄHIGKEIT: Großer Jackpot – drei Würfel: Augensumme ×50 Muscheln und ×2 Schaden an allen Blasen.', apply: (s) => { s.crit5 = true; }, ability: { id: 'jackpot', name: 'Großer Jackpot', cd: 60 } },
+  ],
 };
 for (const k in SC.TIER4) SC.TOWERS[k].paths.forEach((p, i) => p.push(SC.TIER4[k][i]));
 SC.MAX_TIER = 4;
 
-SC.TOWER_ORDER = ['knall', 'fang', 'einsiedler', 'spinne', 'kokos', 'yeti', 'pocke', 'krill', 'winker', 'farm'];
-SC.TOWER_SHORT = {"knall": "Knallkrebs", "fang": "Fangschrecke", "einsiedler": "Einsiedler", "kokos": "Kokoskrabbe", "pocke": "Seepocken", "winker": "Winkerkrabbe", "yeti": "Yeti-Krabbe", "spinne": "Spinnenkrabbe", "krill": "Krillschwarm", "farm": "Garnelenfarm"};
+SC.TOWER_ORDER = ['knall', 'fang', 'einsiedler', 'spinne', 'kokos', 'yeti', 'pocke', 'krill', 'winker', 'farm', 'post', 'tide', 'molt', 'dice'];
+SC.NEW_TOWERS = { post: true, tide: true, molt: true, dice: true };
+SC.TOWER_SHORT = {"knall": "Knallkrebs", "fang": "Fangschrecke", "einsiedler": "Einsiedler", "kokos": "Kokoskrabbe", "pocke": "Seepocken", "winker": "Winkerkrabbe", "yeti": "Yeti-Krabbe", "spinne": "Spinnenkrabbe", "krill": "Krillschwarm", "farm": "Garnelenfarm", "post": "Flaschenpost", "tide": "Gezeiten", "molt": "Häutung", "dice": "Würfelkrabbe"};
 for (const k in SC.TOWERS) {
   SC.TOWERS[k].id = k;
   SC.TOWERS[k].short = SC.TOWER_SHORT[k];
@@ -304,6 +399,77 @@ SC.SENDS = [
 ];
 SC.SEND_QUEUE_MAX = 6;
 SC.SEND_MOD = { camo: { mul: 1.5, round: 12, name: 'Glas' }, regrow: { mul: 1.25, round: 10, name: 'Nachwachs' } };
+SC.POST_QUEUE_MAX = 10; // Flaschenpost darf die Röhre etwas überfüllen
+
+// ============================================================
+//  KRÄFTE (wie die Battle-Powers in BTD Battles)
+//  Vor jeder Partie wählst du 3 aus. Im Spiel kosten sie Muscheln
+//  und haben eine Abklingzeit. target: 'map' = auf die Karte tippen,
+//  'opp' = wirkt auf das Feld des Gegners.
+// ============================================================
+SC.POWERS = [
+  { id: 'spikes', name: 'Seeigel-Teppich', desc: 'Legt einen Seeigel-Teppich auf die Strecke: 60 Treffer.', cost: 120, cd: 20, round: 1, target: 'map', col: '#7a4bd6' },
+  { id: 'bomb', name: 'Tiefseebombe', desc: 'Explosion an einer Stelle: 20 Schaden, 120 Treffer, ×3 gegen Riesenblasen.', cost: 260, cd: 30, round: 3, target: 'map', col: '#3a3f4a' },
+  { id: 'cash', name: 'Muschelregen', desc: 'Sofort 150 Muscheln plus 15 pro Runde.', cost: 0, cd: 80, round: 4, col: '#ffd23f' },
+  { id: 'freeze', name: 'Kältewelle', desc: 'Friert alle normalen Blasen 3 s ein, Riesen werden langsamer.', cost: 300, cd: 45, round: 6, col: '#8fe3ff' },
+  { id: 'rage', name: 'Krebs-Wut', desc: 'Alle deine Türme feuern 8 s lang 50 % schneller.', cost: 400, cd: 50, round: 8, col: '#ff5a36' },
+  { id: 'shield', name: 'Muschelschild', desc: '8 s lang blockt ein Schild durchkommende Blasen (bis 40 Leben).', cost: 400, cd: 70, round: 8, col: '#58c4ff' },
+  { id: 'radar', name: 'Leuchtqualle', desc: 'Alle Türme sehen 15 s lang Glas-Blasen.', cost: 200, cd: 40, round: 10, col: '#b6ff6a' },
+  { id: 'heal', name: 'Korallen-Heilung', desc: '+20 Leben (bis zum Maximum).', cost: 600, cd: 90, round: 10, col: '#ff6fb5' },
+  { id: 'boost', name: 'Blasen-Schub', desc: 'Die Blasen deines Gegners sind 6 s lang 40 % schneller.', cost: 500, cd: 45, round: 12, target: 'opp', dur: 6, col: '#ff9a2e' },
+  { id: 'fog', name: 'Tintennebel', desc: 'Die Türme deines Gegners haben 6 s lang 30 % weniger Reichweite.', cost: 500, cd: 45, round: 14, target: 'opp', dur: 6, col: '#2b2440' },
+];
+SC.POWER_BY_ID = {};
+for (const p of SC.POWERS) SC.POWER_BY_ID[p.id] = p;
+
+// ============================================================
+//  AUSRÜSTUNG: 3 Türme frei wählbar + 1 Würfel-Turm (2x neu würfeln)
+//  und 3 Kräfte. Gilt für alle Battles (KI, Server, Direkt-Duell).
+// ============================================================
+SC.LOADOUT = { towers: 3, powers: 3, rerolls: 2 };
+SC.DEFAULT_LOADOUT = { towers: ['knall', 'fang', 'einsiedler'], powers: ['spikes', 'bomb', 'freeze'] };
+// Prüft und normalisiert eine Ausrüstung (null = ungültig)
+SC.checkLoadout = function (l) {
+  if (!l || typeof l !== 'object' || !Array.isArray(l.towers) || !Array.isArray(l.powers)) return null;
+  const towers = l.towers.filter((k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(SC.TOWERS, k));
+  const powers = l.powers.filter((k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(SC.POWER_BY_ID, k));
+  if (towers.length !== SC.LOADOUT.towers || new Set(towers).size !== towers.length) return null;
+  if (powers.length !== SC.LOADOUT.powers || new Set(powers).size !== powers.length) return null;
+  return { towers: towers.slice(), powers: powers.slice() };
+};
+// Würfel: zufälliger 4. Turm, der nicht schon gewählt ist
+SC.dicePool = (towers) => SC.TOWER_ORDER.filter((k) => towers.indexOf(k) < 0);
+SC.rollDice = function (towers, rnd, not) {
+  let pool = SC.dicePool(towers);
+  if (not && pool.length > 1) pool = pool.filter((k) => k !== not);
+  return pool[Math.floor((rnd || Math.random)() * pool.length)];
+};
+
+// Wer kann Glas sehen / Panzer knacken? [Pfad, Stufe] – Stufe 0 = von Anfang an
+SC.CAPS = {
+  knall: { armor: [1, 1] },
+  fang: { armor: [0, 0], camo: [1, 2] },
+  einsiedler: { armor: [1, 1] },
+  spinne: { armor: [1, 1], camo: [1, 2] },
+  kokos: { armor: [0, 0] },
+  yeti: { armor: [0, 2], camo: [0, 0] },
+  pocke: { armor: [0, 2], camo: [0, 0] },
+  krill: { camo: [0, 2] },
+  winker: { armor: [1, 2], camo: [1, 1] },
+  farm: {},
+  post: { armor: [0, 2], camo: [0, 3] },
+  tide: { armor: [0, 2], camo: [1, 2] },
+  molt: { armor: [0, 0] },
+  dice: { armor: [0, 0], camo: [1, 2] },
+};
+
+// Häutungs-Hummer: benötigte Erfahrung für Level 1..10
+SC.MOLT_XP = [0, 18, 50, 110, 200, 330, 500, 720, 1000, 1350];
+SC.moltLevel = function (xp) {
+  let l = 1;
+  while (l < SC.MOLT_XP.length && xp >= SC.MOLT_XP[l]) l++;
+  return l;
+};
 
 // ============================================================
 //  KARTEN

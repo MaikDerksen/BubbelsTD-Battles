@@ -1,0 +1,5 @@
+# Caddy holt das HTTPS-Zertifikat automatisch und leitet alles (inkl. WebSocket) an den Spiel-Server weiter.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy game:8080
+}

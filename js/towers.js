@@ -731,13 +731,13 @@
   };
 
   // ---------- Sprite-Ausgabe ----------
-  const ROT_FREE = { pocke: true, farm: true, krill: true };
+  const ROT_FREE = { pocke: true, farm: true, krill: true, tide: true };
   SC.ROT_FREE = ROT_FREE;
   const SIZE = 124, SCALE = 1.08;
 
   function frame(t, time) {
     if (t.kind === 'winker') return Math.floor(time * (t.danceT > 0 ? 7 : 2.5)) % 2;
-    if (t.kind === 'pocke' || t.kind === 'farm' || t.kind === 'krill' || t.kind === 'spinne') return Math.floor(time * 2) % 2;
+    if (t.kind === 'pocke' || t.kind === 'farm' || t.kind === 'krill' || t.kind === 'spinne' || t.kind === 'post' || t.kind === 'tide' || t.kind === 'dice') return Math.floor(time * 2) % 2;
     return 0;
   }
   // BTD5-typischer Schlagschatten: dunkle, versetzte Silhouette
@@ -767,7 +767,7 @@
     });
   };
   SC.drawTower = function (ctx, t, time, opts) {
-    const atk = (t.anim || 0) > 0.45 && !ROT_FREE[t.kind] && t.kind !== 'winker' && t.kind !== 'yeti';
+    const atk = (t.anim || 0) > 0.45 && (!ROT_FREE[t.kind] || t.kind === 'tide') && t.kind !== 'winker' && t.kind !== 'yeti';
     const e = SC.towerSprite(t.kind, t.tiers, atk, frame(t, time || 0), t.danceT > 0);
     if (t.tiers[0] >= 4 || t.tiers[1] >= 4) {
       ctx.beginPath();
@@ -781,6 +781,7 @@
     }
     // Platzier-Bounce & leichtes Atmen
     let sc = 1 + Math.sin((time || 0) * 2.4 + (t.id || 0)) * 0.018;
+    if (t.kind === 'molt') sc *= 1 + ((t.lvl || 1) - 1) * 0.028; // wächst mit jeder Häutung
     if (t.born != null && time - t.born < 0.45) {
       const u = (time - t.born) / 0.45;
       sc *= 1 + Math.sin(u * Math.PI * 2.2) * (1 - u) * 0.35 - (1 - u) * 0.25;
@@ -804,7 +805,7 @@
     const c = document.createElement('canvas');
     c.width = c.height = size * 2;
     const ctx = c.getContext('2d');
-    const span = kind === 'spinne' || kind === 'farm' ? 98 : 76;
+    const span = kind === 'spinne' || kind === 'farm' ? 98 : kind === 'tide' ? 84 : 76;
     ctx.scale((size * 2) / span, (size * 2) / span);
     ctx.translate(span / 2, span / 2 + 1);
     ctx.shadowColor = 'rgba(0,0,0,0.35)';

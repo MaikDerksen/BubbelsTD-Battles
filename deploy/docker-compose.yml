@@ -1,0 +1,50 @@
+# Scherenschlacht mit automatischem HTTPS (Let's Encrypt über Caddy).
+#
+#   1. DNS: A/AAAA-Eintrag deiner Domain auf den Server zeigen lassen
+#   2. cp .env.example .env   und DOMAIN eintragen
+#   3. docker compose up -d --build
+#
+# Danach läuft das Spiel unter https://DEINE-DOMAIN und alle verbinden sich dorthin.
+services:
+  game:
+    build: ..
+    restart: unless-stopped
+    environment:
+      TRUST_PROXY: "1"
+      PUBLIC_ORIGIN: "https://${DOMAIN}"
+      SERVER_NAME: "${SERVER_NAME:-Scherenschlacht-Server}"
+      ALLOW_REGISTRATION: "${ALLOW_REGISTRATION:-1}"
+      MAX_MATCHES: "${MAX_MATCHES:-150}"
+    volumes:
+      - game-data:/data
+    expose:
+      - "8080"
+    # Härtung: nur-lesbares Dateisystem, keine Zusatzrechte
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - game
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: "${DOMAIN}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  game-data:
+  caddy-data:
+  caddy-config:

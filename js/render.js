@@ -26,6 +26,20 @@
         ctx.restore();
       }
     }
+    const fl = fieldFlags(f);
+    for (const t of f.towers) {
+      if (t.kind === 'molt' && t.lvl > 1) levelBadge(ctx, t.x + 15, t.y + 15, t.lvl);
+      if (fl.rage) {
+        ctx.save();
+        ctx.globalAlpha = 0.35 + Math.sin(time * 14 + t.x) * 0.15;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, 22, 0, Math.PI * 2);
+        ctx.strokeStyle = '#ff5a36';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
     for (const t of f.towers) {
       if (t.kind === 'krill' && t.drones) for (const d of t.drones) SC.drawKrill(ctx, d.x, d.y, d.a, t.s.camo);
       if (t.s.orbit) {
@@ -36,6 +50,7 @@
         }
       }
     }
+    drawFieldEffects(ctx, f, fl, time);
     if (opts.mini) return;
 
     for (const p of f.projs) drawProj(ctx, p, time);
@@ -66,6 +81,98 @@
     ctx.lineWidth = 2;
     ctx.stroke();
   };
+
+  // Zustände eines Feldes (echtes Feld oder Gegner-Spiegelbild)
+  function fieldFlags(f) {
+    if (f instanceof SC.Ghost) {
+      const F = f.flags || 0;
+      return { shield: !!(F & 1), fog: !!(F & 2), boost: !!(F & 4), rage: !!(F & 8), radar: false };
+    }
+    return { shield: f.shieldT > 0 && f.shieldHp > 0, fog: f.hexFogT > 0, boost: f.hexBoostT > 0, rage: f.rageT > 0, radar: f.radarT > 0 };
+  }
+  function drawFieldEffects(ctx, f, fl, time) {
+    if (fl.shield) {
+      // Schild am Ende der Strecke
+      const P = f.path;
+      P.pos(P.visEnd - 30, _tmp);
+      ctx.save();
+      ctx.globalAlpha = 0.55 + Math.sin(time * 6) * 0.15;
+      ctx.beginPath();
+      ctx.arc(_tmp.x, _tmp.y, 40, 0, Math.PI * 2);
+      const g = ctx.createRadialGradient(_tmp.x, _tmp.y, 10, _tmp.x, _tmp.y, 40);
+      g.addColorStop(0, 'rgba(120,210,255,0.05)');
+      g.addColorStop(1, 'rgba(120,210,255,0.6)');
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.strokeStyle = '#d8f4ff';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (fl.fog) {
+      ctx.save();
+      for (let i = 0; i < 7; i++) {
+        const x = ((i * 173 + time * 18) % (SC.W + 200)) - 100, y = 80 + ((i * 97) % 440);
+        const g = ctx.createRadialGradient(x, y, 10, x, y, 150);
+        g.addColorStop(0, 'rgba(30,20,50,0.42)');
+        g.addColorStop(1, 'rgba(30,20,50,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x - 150, y - 150, 300, 300);
+      }
+      ctx.restore();
+    }
+    if (fl.boost) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,170,60,0.7)';
+      ctx.lineWidth = 2;
+      for (const b of f.bloons) {
+        if (b.dead) continue;
+        const a = (b.a || 0) + Math.PI;
+        ctx.beginPath();
+        ctx.moveTo(b.x + Math.cos(a) * b.def.r, b.y + Math.sin(a) * b.def.r);
+        ctx.lineTo(b.x + Math.cos(a) * (b.def.r + 12), b.y + Math.sin(a) * (b.def.r + 12));
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    if (fl.radar) {
+      ctx.save();
+      ctx.globalAlpha = 0.1 + Math.sin(time * 4) * 0.04;
+      ctx.fillStyle = '#b6ff6a';
+      ctx.fillRect(0, 0, SC.W, SC.H);
+      ctx.restore();
+    }
+  }
+  function levelBadge(ctx, x, y, lvl) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, 8, 0, Math.PI * 2);
+    ctx.fillStyle = lvl >= 10 ? '#ffd23f' : '#ff7a3d';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#1b1208';
+    ctx.stroke();
+    ctx.font = '400 10px "Luckiest Guy", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(String(lvl), x, y + 1);
+    ctx.restore();
+  }
+  // Würfel mit Augenzahl (lokal, Mitte 0/0)
+  const PIPS = { 1: [[0, 0]], 2: [[-1, -1], [1, 1]], 3: [[-1, -1], [0, 0], [1, 1]], 4: [[-1, -1], [1, -1], [-1, 1], [1, 1]], 5: [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]], 6: [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]] };
+  function dieArt(c, s, face, gold) {
+    c.beginPath();
+    c.roundRect(-s, -s, s * 2, s * 2, s * 0.35);
+    shade(c, gold ? '#ffd23f' : '#ffffff', 0, 0, s * 1.3, 1.4);
+    c.fillStyle = face === 1 ? '#e8302a' : '#1b1208';
+    for (const [px, py] of PIPS[face] || PIPS[1]) {
+      c.beginPath();
+      c.arc(px * s * 0.5, py * s * 0.5, s * 0.17, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
+  SC.dieArt = dieArt;
 
   function drawShell(ctx, x, y, spin, shell) {
     const key = 'shell' + (shell || 'snail');
@@ -188,6 +295,24 @@
         SC.spr.blit(ctx, e, p.x, p.y, p.a + time * 20);
         break;
       }
+      case 'die': {
+        if (p.mode === 'lob') {
+          if (p.t < 0) break;
+          const h = p.h || 0;
+          const e = SC.spr.getShadowed('diebig', 44, (c) => dieArt(c, 13, 6, true), 3);
+          SC.spr.blit(ctx, e, p.x, p.y - h * 60, time * 9, 1 + h * 0.4);
+          break;
+        }
+        if (p.crit) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 13, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(255,225,77,0.45)';
+          ctx.fill();
+        }
+        const e = SC.spr.getShadowed('die' + p.face + (p.crit ? 'g' : ''), 22, (c) => dieArt(c, 6, p.face, p.crit), 2);
+        SC.spr.blit(ctx, e, p.x, p.y, (p.a || 0) + time * 14);
+        break;
+      }
       case 'cannon': {
         const e = SC.spr.getShadowed('cball', 18, (c) => {
           C(c, 0, 0, 5.5, '#3a3a42', 1.5);
@@ -203,8 +328,36 @@
     const u = pl.fly;
     const x = SC.lerp(pl.sx, pl.x, u), y = SC.lerp(pl.sy, pl.y, u) - Math.sin(u * Math.PI) * 30;
     const sc = (pl.big ? 1.5 : 1) * (0.55 + 0.45 * Math.max(0.2, pl.pierce / pl.maxP));
-    const key = 'pile' + (pl.mine ? 'm' : pl.big ? 'b' : pl.type === 'punch' ? 's' : 'n');
+    const key = 'pile' + (pl.urchin ? 'u' : pl.shell ? 'h' : pl.mine ? 'm' : pl.big ? 'b' : pl.type === 'punch' ? 's' : 'n');
     const e = SC.spr.getShadowed(key, 30, (c) => {
+      if (pl.urchin) {
+        // Seeigel: Kugel mit Stacheln
+        c.strokeStyle = '#2a1650';
+        c.lineWidth = 1.6;
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2;
+          c.beginPath();
+          c.moveTo(Math.cos(a) * 4, Math.sin(a) * 4);
+          c.lineTo(Math.cos(a) * 11, Math.sin(a) * 11);
+          c.stroke();
+        }
+        C(c, 0, 0, 6, '#7a4bd6', 1.4);
+        gloss(c, -2, -2, 2.2, 1.2, 0.8);
+        return;
+      }
+      if (pl.shell) {
+        // alte Hummerschale
+        E(c, 0, 0, 9, 6, 0.3, '#f2c2a6', 1.4, { ol: '#8a4a2a' });
+        for (let i = -1; i <= 1; i++) {
+          c.beginPath();
+          c.moveTo(i * 4 - 2, -5);
+          c.lineTo(i * 4 + 2, 5);
+          c.strokeStyle = 'rgba(138,74,42,0.6)';
+          c.lineWidth = 1.2;
+          c.stroke();
+        }
+        return;
+      }
       if (pl.mine) {
         C(c, 0, 0, 8, '#9aa1a8', 2);
         C(c, 0, 0, 3.5, '#e8302a', 1);
@@ -390,6 +543,56 @@
         ctx.beginPath();
         ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
+        break;
+      }
+      case 'net': {
+        ctx.save();
+        ctx.globalAlpha = 1 - u;
+        const r = e.r * (0.6 + u * 0.6);
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, r, 0, Math.PI * 2);
+        ctx.strokeStyle = '#f5e6bd';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.beginPath();
+        for (let i = -2; i <= 2; i++) {
+          ctx.moveTo(e.x - r, e.y + (i * r) / 2.5);
+          ctx.lineTo(e.x + r, e.y + (i * r) / 2.5);
+          ctx.moveTo(e.x + (i * r) / 2.5, e.y - r);
+          ctx.lineTo(e.x + (i * r) / 2.5, e.y + r);
+        }
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+        break;
+      }
+      case 'tide': {
+        ctx.save();
+        for (let k = 0; k < 3; k++) {
+          const v = u - k * 0.15;
+          if (v <= 0 || v >= 1) continue;
+          ctx.globalAlpha = (1 - v) * 0.8;
+          ctx.beginPath();
+          ctx.arc(e.x, e.y, 18 + v * (e.r - 18), 0, Math.PI * 2);
+          ctx.strokeStyle = k ? '#bff4ff' : '#3ec6f0';
+          ctx.lineWidth = 6 - k * 1.5;
+          ctx.stroke();
+        }
+        ctx.restore();
+        break;
+      }
+      case 'bottle': {
+        // Flaschenpost fliegt zum Gegner (nach rechts oben aus dem Bild)
+        const x = e.x + u * u * 520, y = e.y - Math.sin(u * Math.PI * 0.9) * 120 - u * 80;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(u * 9);
+        E(ctx, 0, 0, 10, 5, 0, '#4cc27a', 1.5, { ol: '#11502c' });
+        ctx.fillStyle = '#a0703a';
+        ctx.fillRect(9, -2.2, 5, 4.4);
+        ctx.fillStyle = '#fff6dc';
+        ctx.fillRect(-5, -2, 8, 4);
         ctx.restore();
         break;
       }

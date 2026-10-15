@@ -3,6 +3,23 @@
 //  KI-Gegner: baut, rüstet auf, farmt und schickt Blasen
 // ============================================================
 SC.AI = class AI {
+  // KI-Ausrüstung: 3 Türme + Würfel, muss Glas und Panzer kontern können
+  static pickLoadout(diff) {
+    const pool = SC.TOWER_ORDER.filter((k) => k !== 'farm' && k !== 'winker');
+    const can = (list, cap) => list.some((k) => SC.CAPS[k][cap]);
+    let towers = null;
+    for (let i = 0; i < 60; i++) {
+      const p = pool.slice().sort(() => Math.random() - 0.5).slice(0, 3);
+      if (i < 50 && (!can(p, 'camo') || !can(p, 'armor'))) continue;
+      towers = p;
+      break;
+    }
+    if (diff !== 'easy' && Math.random() < 0.5) towers[2] = 'farm';
+    towers.push(SC.rollDice(towers));
+    const pw = SC.POWERS.map((p) => p.id).sort(() => Math.random() - 0.5).slice(0, 3);
+    return { towers, powers: pw };
+  }
+
   constructor(field, enemy, game, diff) {
     this.f = field;
     this.e = enemy;
@@ -42,6 +59,7 @@ SC.AI = class AI {
     if (this.t > 0) return;
     this.t = this.p.think * (0.7 + Math.random() * 0.6);
     this.useAbilities();
+    this.usePowers();
     // mehrere Aktionen pro Denkschritt, wenn viel Geld da ist
     for (let i = 0; i < 4; i++) if (!this.act()) break;
   }
@@ -56,6 +74,33 @@ SC.AI = class AI {
       if (!f.canUseAbility(t)) continue;
       const id = t.ab.def.id;
       if (id === 'cash' || id === 'bank' || vis.length > 25 || moab || danger) f.useAbility(t);
+    }
+  }
+
+  usePowers() {
+    const f = this.f, r = Math.max(1, this.g.round);
+    if (this.p.smart < 0.5 && Math.random() < 0.5) return;
+    const vis = f.visibleBloons();
+    let front = null;
+    for (const b of vis) if (!front || b.dist > front.dist) front = b;
+    const danger = front && front.dist > f.path.len * 0.55;
+    for (let i = 0; i < f.powers.length; i++) {
+      const st = f.powerState(i, r);
+      if (!st.ok || f.money - st.def.cost < 150) continue;
+      const id = st.def.id;
+      let x = 0, y = 0, use = false;
+      if (id === 'cash') use = true;
+      else if (id === 'spikes' || id === 'bomb') {
+        if (danger) {
+          x = front.x;
+          y = front.y;
+          use = true;
+        }
+      } else if (id === 'freeze' || id === 'shield' || id === 'rage') use = danger && vis.length > 8;
+      else if (id === 'radar') use = vis.some((b) => b.camo) && !this.hasCamo();
+      else if (id === 'heal') use = f.lives < 90;
+      else if (id === 'boost' || id === 'fog') use = this.e.bloons.length > 12 && Math.random() < 0.3;
+      if (use) f.usePower(i, x, y, r);
     }
   }
 
@@ -78,7 +123,7 @@ SC.AI = class AI {
 
     // Farm?
     const farms = f.towers.filter((t) => t.kind === 'farm').length;
-    if (farms < this.p.farms && r >= 4 && r < 26 && f.money > 1100) {
+    if (f.canBuild('farm') && farms < this.p.farms && r >= 4 && r < 26 && f.money > 1100) {
       return this.place('farm');
     }
     if (farms && Math.random() < 0.3 * this.p.smart) {
@@ -93,10 +138,10 @@ SC.AI = class AI {
   }
 
   hasCamo() {
-    return this.f.towers.some((t) => t.s.camo || t.s.auraCamo || t.buff.camo);
+    return this.f.towers.some((t) => t.s.camo || t.s.auraCamo || t.buff.camo || t.kind === 'yeti' || t.kind === 'pocke' || (t.kind === 'molt' && t.lvl >= 5));
   }
   hasArmor() {
-    return this.f.towers.some((t) => ['punch', 'blast', 'heat'].includes(t.s.type) || t.s.auraArmor);
+    return this.f.towers.some((t) => (['punch', 'blast', 'heat'].includes(t.s.type) || (t.s.type === 'cold' && t.s.dmg > 0)) || t.s.auraArmor || (t.kind === 'post' && t.s.catchMax >= 7));
   }
 
   buildDefense(r) {
@@ -111,14 +156,14 @@ SC.AI = class AI {
         if (st.u && f.money > st.u.cost * 0.5) return false; // dafür sparen
       }
     }
-    // Pflicht: Panzer- & Glas-Konter
-    if (r >= 15 && !this.hasArmor()) {
-      if (!f.towers.some((t) => t.kind === 'fang')) return this.place('fang');
+    // Pflicht: Panzer- & Glas-Konter mit dem, was die Ausrüstung hergibt
+    if (r >= 13 && !this.hasArmor()) {
+      const res = this.counter('armor');
+      if (res !== null) return res;
     }
     if (r >= 15 && !this.hasCamo()) {
-      const fang = f.towers.find((t) => t.kind === 'fang' && t.tiers[1] < 2 && t.tiers[0] < 2);
-      if (fang) return this.tryUpgrade(fang, 1) || false;
-      return this.place('fang');
+      const res = this.counter('camo');
+      if (res !== null) return res;
     }
     const towers = f.towers.filter((t) => t.kind !== 'farm' && t.kind !== 'winker');
     const maxTowers = 2 + Math.floor(r / 3);
@@ -147,19 +192,41 @@ SC.AI = class AI {
     return false;
   }
 
+  // baut oder rüstet einen Turm auf, der die Fähigkeit cap ('camo'/'armor') bekommt
+  counter(cap) {
+    const f = this.f;
+    const kinds = (f.allowed || SC.TOWER_ORDER).filter((k) => SC.CAPS[k] && SC.CAPS[k][cap]);
+    if (!kinds.length) return null;
+    for (const t of f.towers) {
+      const c = SC.CAPS[t.kind][cap];
+      if (!c || t.tiers[c[0]] >= c[1]) continue;
+      const other = t.tiers[1 - c[0]];
+      if (c[1] >= 3 && other >= 3) continue;
+      this.fav[t.id] = c[0];
+      return this.tryUpgrade(t, c[0]);
+    }
+    kinds.sort((a, b) => SC.CAPS[a][cap][1] - SC.CAPS[b][cap][1]);
+    return this.place(kinds[0]);
+  }
+
   pathOrder(t) {
     if (this.fav[t.id] == null) this.fav[t.id] = this.favPath(t.kind);
     const a = this.fav[t.id];
     return t.tiers[a] < SC.MAX_TIER ? [a, 1 - a] : [1 - a];
   }
   favPath(kind) {
-    const pref = { knall: 0.5, fang: 0.5, einsiedler: 0.7, kokos: 0.6, pocke: 0.6, winker: 0.5, yeti: 0.6, spinne: 0.65, krill: 0.5 };
+    const pref = { knall: 0.5, fang: 0.5, einsiedler: 0.7, kokos: 0.6, pocke: 0.6, winker: 0.5, yeti: 0.6, spinne: 0.65, krill: 0.5, post: 0.6, tide: 0.55, molt: 0.6, dice: 0.5 };
     return Math.random() < (pref[kind] || 0.5) ? 0 : 1;
   }
 
   pickKind(r) {
-    const w = { knall: 3, fang: 2.5, einsiedler: 1.6, spinne: 2, kokos: r >= 6 ? 1.6 : 0, yeti: r >= 8 ? 0.6 : 0, pocke: r >= 5 ? 1.2 : 0, krill: r >= 10 ? 1.6 : 0 };
-    if (this.f.towers.length >= 6 && !this.f.towers.some((t) => t.kind === 'winker')) w.winker = 1.5;
+    const all = { knall: 3, fang: 2.5, einsiedler: 1.6, spinne: 2, kokos: r >= 6 ? 1.6 : 0.4, yeti: r >= 8 ? 0.6 : 0.2, pocke: r >= 5 ? 1.2 : 0.3, krill: r >= 10 ? 1.6 : 0.4, post: 1.2, tide: r >= 6 ? 1 : 0.3, molt: 2, dice: 2.4 };
+    if (this.f.towers.length >= 6 && !this.f.towers.some((t) => t.kind === 'winker')) all.winker = 1.5;
+    const w = {};
+    for (const k in all) if (this.f.canBuild(k) && all[k] > 0) w[k] = all[k];
+    if (!Object.keys(w).length) {
+      for (const k of this.f.allowed || []) if (k !== 'farm') w[k] = 1;
+    }
     let sum = 0;
     for (const k in w) sum += w[k];
     let x = Math.random() * sum;
@@ -167,12 +234,12 @@ SC.AI = class AI {
       x -= w[k];
       if (x <= 0) return k;
     }
-    return 'knall';
+    return Object.keys(w)[0] || 'knall';
   }
 
   place(kind) {
     const f = this.f;
-    if (f.money < SC.TOWERS[kind].cost) return false;
+    if (!f.canBuild(kind) || f.money < SC.TOWERS[kind].cost) return false;
     const cands = [];
     for (const s of this.spots) {
       if (kind === 'farm' && s.near) continue;
@@ -194,7 +261,7 @@ SC.AI = class AI {
     const s = cands[Math.floor(Math.random() * Math.min(cands.length, this.p.pick))];
     const t = f.placeTower(kind, s.x, s.y);
     if (t) {
-      if (kind === 'yeti' || kind === 'spinne') t.target = 'close';
+      if (kind === 'yeti' || kind === 'spinne' || kind === 'molt') t.target = 'close';
       if (kind === 'kokos' && Math.random() < 0.5) t.target = 'strong';
     }
     return !!t;

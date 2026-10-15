@@ -99,5 +99,36 @@ SC.ICON = (function () {
   function back() {
     return arrow('l');
   }
-  return { music, coin, heart, eco, hourglass, flag, lock, gear, play, ffwd, sound, close, arrow, bolt, eye, leaf, target, trophy, swords, globe, wave, book, back };
+  function dice(face) {
+    const g = id();
+    const P = { 1: [[16, 16]], 2: [[11, 11], [21, 21]], 3: [[10, 10], [16, 16], [22, 22]], 4: [[11, 11], [21, 11], [11, 21], [21, 21]], 5: [[10, 10], [22, 10], [16, 16], [10, 22], [22, 22]], 6: [[11, 9], [21, 9], [11, 16], [21, 16], [11, 23], [21, 23]] }[face || 5];
+    return wrap('0 0 32 32', lin(g, '#ffffff', '#d4dde6') + '<rect x="4" y="4" width="24" height="24" rx="6" fill="url(#' + g + ')" stroke="' + OL + '" stroke-width="2.4"/>' + P.map(([x, y]) => '<circle cx="' + x + '" cy="' + y + '" r="2.6" fill="' + (face === 1 ? '#e8302a' : OL) + '"/>').join('') + '<path d="M8 8 Q12 6 15 7" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round"/>');
+  }
+  function user() {
+    const g = id();
+    return wrap('0 0 32 32', lin(g, '#ffe9a8', '#f2a23a') + '<circle cx="16" cy="11" r="6.5" fill="url(#' + g + ')" stroke="' + OL + '" stroke-width="2.2"/><path d="M5 28 Q6 18 16 18 Q26 18 27 28 Z" fill="url(#' + g + ')" stroke="' + OL + '" stroke-width="2.2" stroke-linejoin="round"/>');
+  }
+  function crate() {
+    const g = id();
+    return wrap('0 0 32 32', lin(g, '#e0a05a', '#9a5a24') + '<rect x="4" y="7" width="24" height="19" rx="3" fill="url(#' + g + ')" stroke="' + OL + '" stroke-width="2.4"/><path d="M4 14 H28 M16 7 V26" stroke="' + OL + '" stroke-width="1.8"/>');
+  }
+  // Symbole der Kräfte (runde Plakette in der Farbe der Kraft)
+  const POWER_ART = {
+    spikes: '<circle cx="16" cy="17" r="6" fill="#7a4bd6" stroke="#1b1208" stroke-width="1.8"/>' + Array.from({ length: 12 }, (_, i) => { const a = (i / 12) * Math.PI * 2; return '<path d="M' + (16 + Math.cos(a) * 6) + ' ' + (17 + Math.sin(a) * 6) + ' L' + (16 + Math.cos(a) * 11.5) + ' ' + (17 + Math.sin(a) * 11.5) + '" stroke="#2a1650" stroke-width="2" stroke-linecap="round"/>'; }).join(''),
+    bomb: '<circle cx="15" cy="18" r="9" fill="#2b2f3a" stroke="#1b1208" stroke-width="2"/><rect x="17" y="6" width="6" height="5" rx="1" fill="#555" stroke="#1b1208" stroke-width="1.5" transform="rotate(35 20 8)"/><path d="M23 6 Q26 2 28 4" stroke="#a0703a" stroke-width="2" fill="none"/><circle cx="28" cy="4" r="2.2" fill="#ffd23f"/><ellipse cx="11" cy="14" rx="3" ry="1.6" fill="#fff" opacity=".6"/>',
+    cash: '<ellipse cx="16" cy="22" rx="10" ry="4" fill="#e9a20e" stroke="#1b1208" stroke-width="1.8"/><ellipse cx="16" cy="18" rx="10" ry="4" fill="#ffd23f" stroke="#1b1208" stroke-width="1.8"/><ellipse cx="16" cy="13" rx="10" ry="4" fill="#ffe14d" stroke="#1b1208" stroke-width="1.8"/><path d="M12 13 Q16 8 20 13" stroke="#c07a06" stroke-width="1.6" fill="none"/>',
+    freeze: '<g stroke="#1b1208" stroke-width="4.2" stroke-linecap="round"><path d="M16 4 V28 M5.6 10 L26.4 22 M5.6 22 L26.4 10"/></g><g stroke="#dff6ff" stroke-width="2.2" stroke-linecap="round"><path d="M16 4 V28 M5.6 10 L26.4 22 M5.6 22 L26.4 10"/></g>',
+    rage: '<path d="M16 3 C20 9 26 12 24 20 C23 26 19 29 16 29 C11 29 7 25 8 19 C9 15 12 14 12 9 C14 11 15 13 16 3 Z" fill="#ff5a36" stroke="#1b1208" stroke-width="2" stroke-linejoin="round"/><path d="M16 14 C18 18 21 19 20 23 C19 26 13 26 12 23 C12 20 15 19 16 14 Z" fill="#ffd23f"/>',
+    shield: '<path d="M16 3 L27 7 V15 C27 22 22 27 16 29 C10 27 5 22 5 15 V7 Z" fill="#58c4ff" stroke="#1b1208" stroke-width="2.2" stroke-linejoin="round"/><path d="M16 7 V25 M9 13 H23" stroke="#fff" stroke-width="2" opacity=".7"/>',
+    radar: '<path d="M6 16 Q6 5 16 5 Q26 5 26 16 Z" fill="#b6ff6a" stroke="#1b1208" stroke-width="2" stroke-linejoin="round"/><path d="M9 16 Q8 22 10 27 M14 16 Q13 23 15 28 M19 16 Q20 23 18 28 M23 16 Q25 22 23 27" stroke="#5fae2a" stroke-width="2" fill="none" stroke-linecap="round"/><ellipse cx="12" cy="10" rx="3" ry="1.6" fill="#fff" opacity=".7"/>',
+    heal: '<path d="M16 28 C5 20 3 14 5 9 C7 4 13 4 16 9 C19 4 25 4 27 9 C29 14 27 20 16 28 Z" fill="#ff6fb5" stroke="#1b1208" stroke-width="2" stroke-linejoin="round"/><path d="M16 11 V21 M11 16 H21" stroke="#fff" stroke-width="3" stroke-linecap="round"/>',
+    boost: '<path d="M5 9 L14 16 L5 23 M15 9 L24 16 L15 23" stroke="#1b1208" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 9 L14 16 L5 23 M15 9 L24 16 L15 23" stroke="#ff9a2e" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="27" cy="16" r="2.5" fill="#e8352b" stroke="#1b1208" stroke-width="1.2"/>',
+    fog: '<path d="M7 22 C3 22 3 16 7 15 C7 10 13 8 16 11 C18 7 25 8 25 13 C29 13 30 21 25 22 Z" fill="#2b2440" stroke="#1b1208" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="26" r="2" fill="#2b2440"/><circle cx="19" cy="27" r="1.6" fill="#2b2440"/><ellipse cx="13" cy="14" rx="3" ry="1.4" fill="#8a7ab0" opacity=".8"/>',
+  };
+  function power(pid) {
+    const def = SC.POWER_BY_ID[pid];
+    const g = id();
+    return wrap('0 0 32 32', '<defs><radialGradient id="' + g + '" cx=".4" cy=".35" r=".75"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="' + (def ? def.col : '#888') + '"/></radialGradient></defs><circle cx="16" cy="16" r="15" fill="url(#' + g + ')" opacity=".55"/>' + (POWER_ART[pid] || ''));
+  }
+  return { music, coin, heart, eco, hourglass, flag, lock, gear, play, ffwd, sound, close, arrow, bolt, eye, leaf, target, trophy, swords, globe, wave, book, back, dice, user, crate, power };
 })();

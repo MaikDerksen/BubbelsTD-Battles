@@ -36,6 +36,7 @@
             <button class="btn green big" data-go="setup-ai"><i data-icon="swords"></i>Duell gegen KI</button>
             <button class="btn blue big" data-go="online"><i data-icon="globe"></i>Online-Duell</button>
             <button class="btn orange big" data-go="setup-classic"><i data-icon="wave"></i>Klassik-Wellen</button>
+            <button class="btn purple" data-go="loadout"><i data-icon="dice"></i>Ausrüstung</button>
           </div>
         </div>
         <div class="corner">
@@ -65,23 +66,84 @@
 
       <!-- ================= ONLINE ================= -->
       <section id="online" class="screen bricks">
-        <div class="board">
+        <div class="board wide">
           <div class="board-head">
             <button class="rbtn small" data-go="title" aria-label="Zurück"><i data-icon="back"></i></button>
             <h2>Online-Duell</h2>
+            <div id="srv-badge" class="srv-badge hidden"></div>
           </div>
           <div class="board-body">
-            <p class="hint">Ein Spieler erstellt einen Raum, der andere gibt den 4-stelligen Code ein. Beide brauchen Internet.</p>
-            <h3>Karte (wählt der Gastgeber)</h3>
+            <h3>Karte</h3>
             <div id="map-list-online" class="map-list"></div>
-            <div class="online-row">
-              <button class="btn green big" id="btn-host">Raum erstellen</button>
-              <div class="join">
-                <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" />
-                <button class="btn blue big" id="btn-join">Beitreten</button>
+            <div class="online-cols">
+              <div class="ocol" id="srv-col">
+                <h3><i data-icon="globe"></i> Spiel-Server</h3>
+                <div id="srv-off" class="hint">Suche Spiel-Server …</div>
+                <div id="srv-on" class="hidden">
+                  <div id="acct" class="acct"></div>
+                  <div class="obtns">
+                    <button class="btn green" id="btn-quick"><i data-icon="swords"></i>Schnelles Spiel</button>
+                    <button class="btn blue" id="btn-room">Raum erstellen</button>
+                  </div>
+                  <div class="join">
+                    <input id="room-code" maxlength="5" placeholder="RAUM" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+                    <button class="btn blue" id="btn-room-join">Beitreten</button>
+                  </div>
+                  <div class="obtns small">
+                    <button class="btn grey" id="btn-lb"><i data-icon="trophy"></i>Rangliste</button>
+                    <button class="btn grey hidden" id="btn-hist"><i data-icon="book"></i>Verlauf</button>
+                  </div>
+                  <div id="srv-status" class="status"></div>
+                </div>
+              </div>
+              <div class="ocol">
+                <h3><i data-icon="bolt"></i> Direkt (ohne Server)</h3>
+                <p class="hint">Peer-to-Peer per 4-stelligem Code – z. B. mit einem Freund, auch wenn kein Server läuft.</p>
+                <div class="obtns">
+                  <button class="btn green" id="btn-host">Code erstellen</button>
+                </div>
+                <div class="join">
+                  <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+                  <button class="btn blue" id="btn-join">Beitreten</button>
+                </div>
+                <div id="online-status" class="status"></div>
               </div>
             </div>
-            <div id="online-status" class="status"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= AUSRÜSTUNG ================= -->
+      <section id="loadout" class="screen bricks">
+        <div class="board wide">
+          <div class="board-head">
+            <button class="rbtn small" data-go="title" aria-label="Zurück"><i data-icon="back"></i></button>
+            <h2>Ausrüstung</h2>
+          </div>
+          <div class="board-body" id="loadout-body"></div>
+        </div>
+      </section>
+
+      <!-- ================= VORRUNDE (Würfel & Ausrüstung) ================= -->
+      <section id="prematch" class="screen bricks">
+        <div class="board wide">
+          <div class="board-head">
+            <button class="rbtn small" id="pre-back" aria-label="Zurück"><i data-icon="back"></i></button>
+            <h2>Vorrunde</h2>
+            <div class="pre-vs" id="pre-vs"></div>
+            <div class="pre-clock" id="pre-clock"></div>
+          </div>
+          <div class="board-body">
+            <div class="pre-top">
+              <div class="pre-slots" id="pre-slots"></div>
+              <div class="pre-dice">
+                <div class="dice-card" id="dice-card"></div>
+                <button class="btn orange" id="btn-reroll"><i data-icon="dice"></i><span>Neu würfeln</span></button>
+              </div>
+              <button class="btn green big" id="btn-ready"><i data-icon="play"></i>Bereit!</button>
+            </div>
+            <div id="pre-status" class="status"></div>
+            <div id="pre-edit"></div>
           </div>
         </div>
       </section>
@@ -109,11 +171,23 @@
           <div id="wrap-me" class="field-wrap">
             <canvas id="cv"></canvas>
             <div id="abilities"></div>
+            <div id="powers"></div>
             <div id="banner"></div>
             <div id="toasts"></div>
             <div id="view-label" class="hidden">Feld des Gegners – tippen zum Zurückkehren</div>
           </div>
-          <div id="divider" class="battle-only"><div id="queue"></div></div>
+          <div id="divider" class="battle-only">
+            <div class="pipe out" id="pipe-out" title="Deine gesendeten Blasen – so voll ist die Röhre zum Gegner">
+              <div class="pipe-lbl"><i data-icon="arrow" data-dir="r"></i></div>
+              <div class="pipe-body"><div class="pipe-fill"></div><div class="pipe-items"></div></div>
+              <b class="pipe-cnt">0/6</b>
+            </div>
+            <div class="pipe in" id="pipe-in" title="Blasen, die der Gegner dir schickt">
+              <div class="pipe-lbl"><i data-icon="arrow" data-dir="l"></i></div>
+              <div class="pipe-body"><div class="pipe-fill"></div><div class="pipe-items"></div></div>
+              <b class="pipe-cnt">0/6</b>
+            </div>
+          </div>
           <div id="wrap-opp" class="field-wrap battle-only"><canvas id="cv-opp"></canvas><div class="peek"><i data-icon="eye"></i></div></div>
         </div>
         <div id="bottombar">
@@ -161,18 +235,22 @@
 
     <script src="js/util.js"></script>
     <script src="js/data.js"></script>
+    <script src="js/path.js"></script>
     <script src="js/draw.js"></script>
     <script src="js/towers.js"></script>
+    <script src="js/towers-new.js"></script>
     <script src="js/hero.js"></script>
     <script src="js/maps.js"></script>
     <script src="js/render.js"></script>
     <script src="js/icons.js"></script>
     <script src="js/audio.js"></script>
     <script src="js/field.js"></script>
+    <script src="js/ghost.js"></script>
     <script src="js/ai.js"></script>
     <script src="js/net.js"></script>
     <script src="js/game.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/menu-online.js"></script>
     <script src="js/main.js"></script>
   </body>
 </html>
